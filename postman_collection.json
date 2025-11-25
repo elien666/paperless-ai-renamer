@@ -72,6 +72,78 @@
             "response": []
         },
         {
+            "name": "Find Outliers",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/find-outliers?k_neighbors=5&limit=50",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "find-outliers"
+                    ],
+                    "query": [
+                        {
+                            "key": "k_neighbors",
+                            "value": "5",
+                            "description": "Number of neighbors to consider for outlier detection"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "50",
+                            "description": "Maximum number of outliers to return"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Process Documents",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"document_ids\": [123, 456, 789]\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/process-documents",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "process-documents"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Get Progress",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/progress",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "progress"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
             "name": "Webhook Trigger",
             "request": {
                 "method": "POST",

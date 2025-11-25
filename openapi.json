@@ -98,6 +98,123 @@
                 }
             }
         },
+        "/find-outliers": {
+            "get": {
+                "summary": "Find Outlier Documents",
+                "description": "Identify documents that are isolated in the vector space. Returns a list of document IDs with outlier scores.",
+                "operationId": "find_outliers_find_outliers_get",
+                "parameters": [
+                    {
+                        "name": "k_neighbors",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 5,
+                            "title": "K Neighbors"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 50,
+                            "title": "Limit"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful response with outlier list",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error"
+                    }
+                }
+            }
+        },
+        "/process-documents": {
+            "post": {
+                "summary": "Process Specific Documents",
+                "description": "Accept a list of document IDs and queue them for renaming.",
+                "operationId": "process_documents_process_documents_post",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "document_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "document_ids"
+                                ]
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Processing started",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                }
+            }
+        },
+        "/progress": {
+            "get": {
+                "summary": "Get Processing Progress",
+                "description": "Returns total number of documents to process and how many have been processed.",
+                "operationId": "get_progress_progress_get",
+                "responses": {
+                    "200": {
+                        "description": "Progress info",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "total": {
+                                            "type": "integer"
+                                        },
+                                        "processed": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/webhook": {
             "post": {
                 "summary": "Handle Webhook",
