@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+requests
+chromadb
+sentence-transformers
+apscheduler
+python-dotenv
+pydantic
+pydantic-settings

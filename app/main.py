@@ -1,0 +1,213 @@
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import asynccontextmanager
+import logging
+from app.config import get_settings
+from app.services.paperless import PaperlessClient
+from app.services.ai import AIService
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
+
+# Initialize Services (Lazy loading might be better, but global for simplicity here)
+paperless_client = PaperlessClient()
+ai_service = AIService()
+
+def process_document(doc_id: int):
+    """Core logic to process a single document."""
+    logger.info(f"Processing document {doc_id}...")
+    
+    # 1. Fetch Document
+    doc = paperless_client.get_document(doc_id)
+    if not doc:
+        logger.error(f"Could not find document {doc_id}")
+        return
+
+    content = doc.get("content", "")
+    original_title = doc.get("title", "")
+    
+    logger.info(f"Document {doc_id}: '{original_title}'")
+    
+    if not content:
+        logger.warning(f"Document {doc_id} '{original_title}' has no content. Skipping.")
+        return
+
+    # 2. Generate New Title
+    new_title = ai_service.generate_title(content, original_title)
+    
+    # 3. Update Paperless
+    if new_title and new_title != original_title:
+        if settings.DRY_RUN:
+            logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}'")
+        else:
+            paperless_client.update_document(doc_id, new_title)
+            # 4. Index the document with the NEW title for future RAG
+            ai_service.add_document_to_index(str(doc_id), content, new_title)
+    else:
+        logger.info(f"Document {doc_id} '{original_title}': Title unchanged or generation failed.")
+
+def scheduled_search_job(newer_than: str = None):
+    """Periodic job to find and process documents with bad titles."""
+    logger.info(f"Running search for documents... (newer_than={newer_than})")
+    
+    # Fetch all documents (with optional date filter)
+    # We can't use Paperless search with regex, so we fetch and filter locally
+    all_docs = paperless_client.get_all_documents_filtered(newer_than=newer_than)
+    logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
+    
+    # Filter by BAD_TITLE_REGEX
+    bad_title_pattern = re.compile(settings.BAD_TITLE_REGEX)
+    matching_docs = [doc for doc in all_docs if bad_title_pattern.match(doc.get("title", ""))]
+    
+    logger.info(f"Found {len(matching_docs)} documents matching BAD_TITLE_REGEX: {settings.BAD_TITLE_REGEX}")
+    
+    for doc in matching_docs:
+        logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
+        process_document(doc["id"])
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up Paperless AI Renamer...")
+    
+    # Initialize Scheduler
+    scheduler = BackgroundScheduler()
+    
+    if settings.ENABLE_SCHEDULER:
+        logger.info("Starting scheduler...")
+        scheduler.add_job(scheduled_search_job, 'cron', minute=settings.CRON_SCHEDULE.split()[0].replace('*/', '')) 
+        scheduler.start()
+    else:
+        logger.info("Scheduler is disabled. Use /scan to trigger manually.")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down...")
+    if scheduler.running:
+        scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
+
+@app.post("/scan")
+async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None):
+    """
+    Manually trigger a scan for documents with bad titles.
+    Optionally filter by date (YYYY-MM-DD) using 'newer_than'.
+    """
+    background_tasks.add_task(scheduled_search_job, newer_than)
+    return {"status": "scan_started", "newer_than": newer_than}
+
+@app.post("/index")
+async def trigger_index(background_tasks: BackgroundTasks, older_than: str = None):
+    """
+    Manually trigger bulk indexing of existing documents.
+    Optionally filter by date (YYYY-MM-DD) using 'older_than'.
+    """
+    background_tasks.add_task(run_bulk_index, older_than)
+    return {"status": "indexing_started", "older_than": older_than}
+
+import re
+
+def run_bulk_index(older_than: str = None):
+    """Fetch all documents and index them if they have good titles."""
+    logger.info(f"Starting bulk index... (older_than={older_than})")
+    
+    # 1. Fetch all documents
+    all_docs = paperless_client.get_all_documents(older_than=older_than)
+    logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
+    
+    # 2. Filter and Index
+    count = 0
+    skipped_scan = 0
+    cleaned = 0
+    
+    # Patterns for different date formats
+    full_date_pattern = re.compile(r'^(\d{4})-(\d{2})-(\d{2})\s*')  # YYYY-MM-DD (with day)
+    year_month_pattern = re.compile(r'^(\d{4})-(\d{2})\s+(.+)$')    # YYYY-MM (without day)
+    year_only_pattern = re.compile(r'^(\d{4})\s+(.+)$')             # YYYY only
+    
+    for doc in all_docs:
+        title = doc.get("title", "")
+        content = doc.get("content", "")
+        doc_id = doc.get("id")
+        
+        if not content or not title:
+            continue
+        
+        # Skip documents starting with "Scan"
+        if title.startswith("Scan"):
+            skipped_scan += 1
+            continue
+        
+        # Clean up titles with leading dates
+        cleaned_title = title
+        
+        # Check for full date with day (YYYY-MM-DD) - remove entirely
+        full_date_match = full_date_pattern.match(title)
+        if full_date_match:
+            cleaned_title = title[full_date_match.end():].strip()
+            if cleaned_title:
+                logger.info(f"Removed full date for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+                cleaned += 1
+            else:
+                cleaned_title = title  # Keep original if cleaning results in empty string
+        else:
+            # Check for year-month (YYYY-MM) - flip to MM-YYYY and move to end
+            year_month_match = year_month_pattern.match(title)
+            if year_month_match:
+                year = year_month_match.group(1)
+                month = year_month_match.group(2)
+                rest = year_month_match.group(3)
+                cleaned_title = f"{rest} {month}-{year}"
+                logger.info(f"Moved year-month to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+                cleaned += 1
+            else:
+                # Check for year-only (YYYY) - move to end
+                year_match = year_only_pattern.match(title)
+                if year_match:
+                    year = year_match.group(1)
+                    rest = year_match.group(2)
+                    cleaned_title = f"{rest} {year}"
+                    logger.info(f"Moved year to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+                    cleaned += 1
+        
+        # Index the document with the cleaned title
+        try:
+            ai_service.add_document_to_index(str(doc_id), content, cleaned_title)
+            count += 1
+        except Exception as e:
+            logger.error(f"Failed to index document {doc_id}: {e}")
+    
+    logger.info(f"Bulk index complete. Indexed {count} documents (skipped {skipped_scan} 'Scan' docs, cleaned {cleaned} date prefixes).")
+
+@app.post("/webhook")
+async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Handle incoming webhooks from Paperless."""
+    try:
+        payload = await request.json()
+        logger.info(f"Received webhook: {payload}")
+        
+        # Paperless webhook payload structure:
+        # { "task_id": "...", "document_id": 123, ... }
+        # Note: Check actual Paperless webhook docs. Usually it sends document_id.
+        
+        doc_id = payload.get("document_id")
+        if doc_id:
+            background_tasks.add_task(process_document, doc_id)
+            return {"status": "processing_started", "document_id": doc_id}
+        else:
+            # It might be a different event type or payload
+            logger.warning("Webhook payload missing document_id")
+            return {"status": "ignored", "reason": "missing_document_id"}
+            
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}

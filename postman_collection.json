@@ -1,0 +1,108 @@
+{
+    "info": {
+        "_postman_id": "paperless-ai-renamer",
+        "name": "Paperless AI Renamer",
+        "description": "API for Paperless AI Renamer Service",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/health",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "health"
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Manual Scan",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/scan?newer_than=2024-01-01",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "scan"
+                    ],
+                    "query": [
+                        {
+                            "key": "newer_than",
+                            "value": "2024-01-01",
+                            "description": "Optional: Filter documents added after this date (YYYY-MM-DD)"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Bulk Index",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/index?older_than=2024-01-01",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "index"
+                    ],
+                    "query": [
+                        {
+                            "key": "older_than",
+                            "value": "2024-01-01",
+                            "description": "Optional: Filter documents added before this date (YYYY-MM-DD)"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Webhook Trigger",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"document_id\": 123,\n    \"task_id\": \"uuid-string\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/webhook",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "webhook"
+                    ]
+                }
+            },
+            "response": []
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        }
+    ]
+}
