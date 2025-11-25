@@ -1,4 +1,9 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from threading import Lock
+
+# Global progress tracking
+progress_lock = Lock()
+progress = {"total": 0, "processed": 0}
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 import logging
@@ -63,10 +68,18 @@ def scheduled_search_job(newer_than: str = None):
     matching_docs = [doc for doc in all_docs if bad_title_pattern.match(doc.get("title", ""))]
     
     logger.info(f"Found {len(matching_docs)} documents matching BAD_TITLE_REGEX: {settings.BAD_TITLE_REGEX}")
+
+    # Initialize progress tracking
+    with progress_lock:
+        progress["total"] = len(matching_docs)
+        progress["processed"] = 0
     
     for doc in matching_docs:
         logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
         process_document(doc["id"])
+        # Update processed count
+        with progress_lock:
+            progress["processed"] += 1
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -258,3 +271,8 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@app.get("/progress")
+def get_progress():
+    with progress_lock:
+        return {"total": progress["total"], "processed": progress["processed"]}
