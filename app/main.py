@@ -110,6 +110,53 @@ async def trigger_index(background_tasks: BackgroundTasks, older_than: str = Non
     background_tasks.add_task(run_bulk_index, older_than)
     return {"status": "indexing_started", "older_than": older_than}
 
+@app.get("/find-outliers")
+async def find_outliers(k_neighbors: int = 5, limit: int = 50):
+    """
+    Find documents that are outliers in the vector space.
+    Returns documents sorted by their isolation score (distance to nearest neighbors).
+    
+    Args:
+        k_neighbors: Number of neighbors to consider for outlier detection (default: 5)
+        limit: Maximum number of outliers to return (default: 50)
+    """
+    try:
+        outliers = ai_service.find_outlier_documents(k_neighbors=k_neighbors, limit=limit)
+        return {
+            "status": "success",
+            "count": len(outliers),
+            "outliers": outliers
+        }
+    except Exception as e:
+        logger.error(f"Error finding outliers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-documents")
+async def process_documents(background_tasks: BackgroundTasks, request: Request):
+    """
+    Process a list of document IDs for renaming.
+    Accepts JSON body: {"document_ids": [123, 456, 789]}
+    """
+    try:
+        payload = await request.json()
+        document_ids = payload.get("document_ids", [])
+        
+        if not document_ids:
+            raise HTTPException(status_code=400, detail="No document_ids provided")
+        
+        # Queue each document for processing
+        for doc_id in document_ids:
+            background_tasks.add_task(process_document, doc_id)
+        
+        return {
+            "status": "processing_started",
+            "document_count": len(document_ids),
+            "document_ids": document_ids
+        }
+    except Exception as e:
+        logger.error(f"Error processing documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 import re
 
 def run_bulk_index(older_than: str = None):

@@ -26,7 +26,7 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    environment:
      - PAPERLESS_API_URL=http://your-paperless-url:8000
      - PAPERLESS_API_TOKEN=your_api_token_here
-     - BAD_TITLE_REGEX=^(Scan|\\d{4}[‑/]\\d{2}[‑/]\\d{2}).*
+     - BAD_TITLE_REGEX=^(Scan|\\\\d{4}[-/]\\\\d{2}[-/]\\\\d{2}).*
      - DRY_RUN=True  # Set to False when ready to apply changes
    ```
 
@@ -69,6 +69,22 @@ Build your baseline by indexing existing documents with good titles:
 curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
 ```
 
+### Find Outliers
+Identify documents that are isolated in the vector space (likely have poor titles):
+```bash
+curl -X GET "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
+```
+
+This returns a JSON list of document IDs sorted by outlier score (highest = most isolated).
+
+### Process Specific Documents
+Process a list of document IDs for renaming:
+```bash
+curl -X POST "http://localhost:8000/process-documents" \
+  -H "Content-Type: application/json" \
+  -d '{"document_ids": [123, 456, 789]}'
+```
+
 ### Webhook Integration
 Configure Paperless-ngx to send webhooks:
 1. Go to Paperless Settings → Webhooks
@@ -102,7 +118,7 @@ Configure the service by editing the `environment` section in `docker-compose.ym
 
 To match documents starting with "Scan" OR a date:
 ```yaml
-- BAD_TITLE_REGEX=^(Scan|\\d{4}[‑/]\\d{2}[‑/]\\d{2}|\\d{2}[‑/]\\d{2}[‑/]\\d{4}).*
+- BAD_TITLE_REGEX=^(Scan|\\d{4}[-/]\\d{2}[-/]\\d{2}|\\d{2}[-/]\\d{2}[-/]\\d{4}).*
 ```
 
 ### Example: Custom Prompt Template
@@ -121,6 +137,8 @@ To match documents starting with "Scan" OR a date:
 - `GET /health` - Health check
 - `POST /scan?newer_than=YYYY-MM-DD` - Trigger manual scan
 - `POST /index?older_than=YYYY-MM-DD` - Trigger bulk indexing
+- `GET /find-outliers?k_neighbors=5&limit=50` - Find outlier documents
+- `POST /process-documents` - Process specific document IDs
 - `POST /webhook` - Webhook endpoint for Paperless
 
 ## How It Works
