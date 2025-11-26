@@ -1,9 +1,14 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from threading import Lock
+import uuid
+from datetime import datetime
+from typing import Dict, Any
 
 # Global progress tracking
 progress_lock = Lock()
-progress = {"total": 0, "processed": 0}
+# jobs structure: { job_id: { "status": "running"|"completed"|"failed", "total": 0, "processed": 0, "created_at": timestamp, "newer_than": str } }
+jobs: Dict[str, Any] = {}
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 import logging
@@ -44,42 +49,67 @@ def process_document(doc_id: int):
     new_title = ai_service.generate_title(content, original_title)
     
     # 3. Update Paperless
-    if new_title and new_title != original_title:
+    if new_title is None:
+        logger.error(f"Document {doc_id} '{original_title}': Generation failed.")
+    elif new_title and new_title != original_title:
         if settings.DRY_RUN:
             logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}'")
         else:
             paperless_client.update_document(doc_id, new_title)
             # 4. Index the document with the NEW title for future RAG
             ai_service.add_document_to_index(str(doc_id), content, new_title)
+    elif new_title == original_title:
+        logger.info(f"Document {doc_id} '{original_title}': LLM thinks title is good enough.")
     else:
-        logger.info(f"Document {doc_id} '{original_title}': Title unchanged or generation failed.")
+        # Empty or whitespace-only response
+        logger.warning(f"Document {doc_id} '{original_title}': LLM returned empty title.")
 
-def scheduled_search_job(newer_than: str = None):
+def scheduled_search_job(newer_than: str = None, job_id: str = None):
     """Periodic job to find and process documents with bad titles."""
-    logger.info(f"Running search for documents... (newer_than={newer_than})")
+    logger.info(f"Running search for documents... (newer_than={newer_than}, job_id={job_id})")
     
-    # Fetch all documents (with optional date filter)
-    # We can't use Paperless search with regex, so we fetch and filter locally
-    all_docs = paperless_client.get_all_documents_filtered(newer_than=newer_than)
-    logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
-    
-    # Filter by BAD_TITLE_REGEX
-    bad_title_pattern = re.compile(settings.BAD_TITLE_REGEX)
-    matching_docs = [doc for doc in all_docs if bad_title_pattern.match(doc.get("title", ""))]
-    
-    logger.info(f"Found {len(matching_docs)} documents matching BAD_TITLE_REGEX: {settings.BAD_TITLE_REGEX}")
+    try:
+        # Fetch all documents (with optional date filter)
+        # We can't use Paperless search with regex, so we fetch and filter locally
+        all_docs = paperless_client.get_all_documents_filtered(newer_than=newer_than)
+        logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
+        
+        # Filter by BAD_TITLE_REGEX
+        import re
+        bad_title_pattern = re.compile(settings.BAD_TITLE_REGEX)
+        matching_docs = [doc for doc in all_docs if bad_title_pattern.match(doc.get("title", ""))]
+        
+        logger.info(f"Found {len(matching_docs)} documents matching BAD_TITLE_REGEX: {settings.BAD_TITLE_REGEX}")
 
-    # Initialize progress tracking
-    with progress_lock:
-        progress["total"] = len(matching_docs)
-        progress["processed"] = 0
-    
-    for doc in matching_docs:
-        logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
-        process_document(doc["id"])
-        # Update processed count
-        with progress_lock:
-            progress["processed"] += 1
+        # Initialize progress tracking for this job
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["total"] = len(matching_docs)
+                    jobs[job_id]["processed"] = 0
+        
+        for doc in matching_docs:
+            logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
+            process_document(doc["id"])
+            # Update processed count
+            if job_id:
+                with progress_lock:
+                    if job_id in jobs:
+                        jobs[job_id]["processed"] += 1
+        
+        # Mark job as completed
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["status"] = "completed"
+                    
+    except Exception as e:
+        logger.error(f"Error in scheduled_search_job: {e}")
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["status"] = "failed"
+                    jobs[job_id]["error"] = str(e)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -91,6 +121,9 @@ async def lifespan(app: FastAPI):
     
     if settings.ENABLE_SCHEDULER:
         logger.info("Starting scheduler...")
+        # Note: Scheduler jobs won't have a job_id unless we generate one here, 
+        # but for now we keep it simple as the scheduler is for background automation.
+        # If we want to track scheduled jobs, we'd need to wrap the job function.
         scheduler.add_job(scheduled_search_job, 'cron', minute=settings.CRON_SCHEDULE.split()[0].replace('*/', '')) 
         scheduler.start()
     else:
@@ -110,9 +143,21 @@ async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None
     """
     Manually trigger a scan for documents with bad titles.
     Optionally filter by date (YYYY-MM-DD) using 'newer_than'.
+    Returns a job_id to track progress.
     """
-    background_tasks.add_task(scheduled_search_job, newer_than)
-    return {"status": "scan_started", "newer_than": newer_than}
+    job_id = str(uuid.uuid4())
+    
+    with progress_lock:
+        jobs[job_id] = {
+            "status": "running",
+            "total": 0,
+            "processed": 0,
+            "created_at": datetime.now().isoformat(),
+            "newer_than": newer_than
+        }
+    
+    background_tasks.add_task(scheduled_search_job, newer_than, job_id)
+    return {"status": "scan_started", "job_id": job_id, "newer_than": newer_than}
 
 @app.post("/index")
 async def trigger_index(background_tasks: BackgroundTasks, older_than: str = None):
@@ -273,6 +318,17 @@ def health_check():
     return {"status": "ok"}
 
 @app.get("/progress")
-def get_progress():
+def get_progress(job_id: str = None):
+    """
+    Get progress of scan jobs.
+    If job_id is provided, returns details for that specific job.
+    If no job_id is provided, returns a list of all jobs.
+    """
     with progress_lock:
-        return {"total": progress["total"], "processed": progress["processed"]}
+        if job_id:
+            job = jobs.get(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            return job
+        else:
+            return {"jobs": jobs}
