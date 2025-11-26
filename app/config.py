@@ -18,7 +18,11 @@ class Settings(BaseSettings):
     
     # LLM settings
     LLM_MODEL: str = "llama3"
+    VISION_MODEL: str = "moondream"
+    LANGUAGE: str = "German"
     PROMPT_TEMPLATE: str = """You are a document title generator. Your task is to create ONE concise title for the document below.
+
+IMPORTANT: Generate the title in {language} language.
 
 RULES:
 - Generate ONLY ONE title
@@ -26,6 +30,7 @@ RULES:
 - Do NOT include explanations, alternatives, or multiple options
 - Do NOT include the file extension
 - Keep it short and descriptive
+- The title MUST be in {language} language
 
 {examples}
 
@@ -34,7 +39,7 @@ Document Content:
 
 Original Filename: {filename}
 
-Generate ONE title (one line only):"""
+Generate ONE title in {language} (one line only):"""
 
     class Config:
         env_file = ".env"

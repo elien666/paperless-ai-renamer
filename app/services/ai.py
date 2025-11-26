@@ -112,6 +112,7 @@ class AIService:
         
         try:
             prompt = settings.PROMPT_TEMPLATE.format(
+                language=settings.LANGUAGE,
                 examples=examples_text,
                 content=content[:2000],
                 filename=original_filename
@@ -139,4 +140,42 @@ class AIService:
             return new_title
         except requests.RequestException as e:
             logger.error(f"Error calling Ollama: {e}")
+            return None # Failure
+
+    def generate_title_from_image(self, image_bytes: bytes, original_title: str) -> Optional[str]:
+        """Generate a title from an image using a vision model."""
+        import base64
+        
+        # Convert image bytes to base64
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # 3. Call Ollama with vision model
+        try:
+            language_instruction = f"Generate the title in {settings.LANGUAGE} language. "
+            payload = {
+                "model": settings.VISION_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"{language_instruction}Describe what you see in this image in 5-7 words suitable as a document title. Output ONLY the title, nothing else.",
+                        "images": [image_b64]
+                    }
+                ],
+                "stream": False
+            }
+            response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/chat", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Extract the message content
+            message = result.get("message", {})
+            raw_response = message.get("content", "").strip()
+            
+            # Take only the first non-empty line to avoid multiple titles
+            new_title = raw_response.split('\n')[0].strip()
+            
+            logger.info(f"Generated title from image: {new_title}")
+            return new_title
+        except requests.RequestException as e:
+            logger.error(f"Error calling Ollama vision model: {e}")
             return None # Failure

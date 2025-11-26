@@ -106,3 +106,31 @@ class PaperlessClient:
                 break
         
         return documents
+
+    def get_document_original(self, doc_id: int) -> Optional[bytes]:
+        """Fetch a document's original file."""
+        try:
+            response = requests.get(f"{self.base_url}/api/documents/{doc_id}/download/?original=true", headers=self.headers)
+            response.raise_for_status()
+            logger.info(f"Successfully fetched original file for document {doc_id}")
+            return response.content
+        except requests.RequestException as e:
+            logger.error(f"Error fetching original file for document {doc_id}: {e}")
+            return None
+
+    def get_document_mime_type(self, doc_id: int) -> Optional[str]:
+        """Get the MIME type of a document by checking the download response headers."""
+        try:
+            # Make a HEAD request to get headers without downloading the full file
+            response = requests.head(f"{self.base_url}/api/documents/{doc_id}/download/?original=true", headers=self.headers)
+            response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            if content_type:
+                # Content-Type might include charset, so split on semicolon
+                mime_type = content_type.split(";")[0].strip()
+                logger.info(f"Retrieved MIME type from headers for document {doc_id}: {mime_type}")
+                return mime_type
+            return None
+        except requests.RequestException as e:
+            logger.warning(f"Error fetching MIME type from headers for document {doc_id}: {e}")
+            return None

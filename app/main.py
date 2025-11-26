@@ -1,6 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from threading import Lock
 import uuid
+import mimetypes
 from datetime import datetime
 from typing import Dict, Any
 
@@ -39,8 +40,58 @@ def process_document(doc_id: int):
     content = doc.get("content", "")
     original_title = doc.get("title", "")
     
-    logger.info(f"Document {doc_id}: '{original_title}'")
+    # Try multiple possible field names for MIME type
+    mime_type = (
+        doc.get("original_mime_type") or 
+        doc.get("mime_type") or 
+        doc.get("media_type") or
+        ""
+    )
     
+    # If not found in document response, try to get it from download headers
+    if not mime_type:
+        mime_type = paperless_client.get_document_mime_type(doc_id) or ""
+    
+    # If still not found, try to infer from original_filename extension
+    if not mime_type:
+        original_filename = doc.get("original_file_name", "") or doc.get("original_filename", "")
+        if original_filename:
+            guessed_type, _ = mimetypes.guess_type(original_filename)
+            if guessed_type:
+                mime_type = guessed_type
+                logger.info(f"Inferred MIME type from filename for document {doc_id}: {mime_type}")
+    
+    logger.info(f"Document {doc_id}: '{original_title}' (MIME: {mime_type})")
+    
+    # Check if this is an image document
+    if mime_type and mime_type.startswith("image/"):
+        logger.info(f"Document {doc_id} '{original_title}': Image document detected, using vision model...")
+        
+        # Download original image
+        original_image = paperless_client.get_document_original(doc_id)
+        if not original_image:
+            logger.error(f"Document {doc_id} '{original_title}': Could not fetch original image.")
+            return
+        
+        # Generate title from image
+        new_title = ai_service.generate_title_from_image(original_image, original_title)
+        
+        if new_title is None:
+            logger.error(f"Document {doc_id} '{original_title}': Vision model failed to generate title.")
+        elif new_title and new_title != original_title:
+            if settings.DRY_RUN:
+                logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}' (vision)")
+            else:
+                paperless_client.update_document(doc_id, new_title)
+                # Index with vision-generated title
+                ai_service.add_document_to_index(str(doc_id), content, new_title)
+        elif new_title == original_title:
+            logger.info(f"Document {doc_id} '{original_title}': Vision model thinks title is good enough.")
+        else:
+            logger.warning(f"Document {doc_id} '{original_title}': Vision model returned empty title.")
+        return
+    
+    # For non-image documents, use text-based generation
     if not content:
         logger.warning(f"Document {doc_id} '{original_title}' has no content. Skipping.")
         return
