@@ -61,8 +61,8 @@ class AIService:
         """
         logger.info(f"Finding outliers with k={k_neighbors}, limit={limit}")
         
-        # Get all documents from the collection
-        all_docs = self.collection.get()
+        # Get all documents from the collection, explicitly including embeddings
+        all_docs = self.collection.get(include=['embeddings', 'metadatas'])
         
         if not all_docs['ids'] or len(all_docs['ids']) < k_neighbors + 1:
             logger.warning(f"Not enough documents in index ({len(all_docs['ids']) if all_docs['ids'] else 0}). Need at least {k_neighbors + 1}.")
