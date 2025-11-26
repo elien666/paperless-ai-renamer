@@ -118,7 +118,7 @@ class AIService:
             )
         except KeyError as e:
             logger.error(f"Invalid prompt template: missing key {e}")
-            return original_filename
+            return None
 
         # 3. Call Ollama
         try:
@@ -139,4 +139,4 @@ class AIService:
             return new_title
         except requests.RequestException as e:
             logger.error(f"Error calling Ollama: {e}")
-            return original_filename # Fallback
+            return None # Failure
