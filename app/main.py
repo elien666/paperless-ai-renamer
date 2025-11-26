@@ -22,6 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+logger.info(f"Configuration loaded - LLM_MODEL: {settings.LLM_MODEL}, VISION_MODEL: {settings.VISION_MODEL}, LANGUAGE: {settings.LANGUAGE}")
 
 # Initialize Services (Lazy loading might be better, but global for simplicity here)
 paperless_client = PaperlessClient()

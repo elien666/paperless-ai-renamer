@@ -151,6 +151,7 @@ class AIService:
         
         # 3. Call Ollama with vision model
         try:
+            logger.info(f"Using vision model: {settings.VISION_MODEL} for image title generation")
             language_instruction = f"Generate the title in {settings.LANGUAGE} language. "
             payload = {
                 "model": settings.VISION_MODEL,
