@@ -14,35 +14,10 @@ const ProgressContext = createContext<ProgressContextType>({
   subscribe: () => () => {}, // Dummy subscribe function for initial context
 });
 
-// Mock data for development/demo purposes
-const MOCK_PROCESS_JOB: ProgressResponse = {
-  status: 'running',
-  total: 1,
-  processed: 0,
-  created_at: new Date().toISOString(),
-  document_id: 1602,
-  document_title: 'Example Document Title',
-};
-
-// Enable mock process job - set to false to disable
-const ENABLE_MOCK_PROCESS = localStorage.getItem('mockProcess') !== 'false';
-
 export function ProgressProvider({ children }: { children: React.ReactNode }) {
-  const [progress, setProgress] = useState<Record<string, ProgressResponse>>(() => {
-    // Initialize with mock data if enabled
-    if (ENABLE_MOCK_PROCESS) {
-      return {
-        'process-mock-12345': MOCK_PROCESS_JOB,
-      } as Record<string, ProgressResponse>;
-    }
-    return {} as Record<string, ProgressResponse>;
-  });
+  const [progress, setProgress] = useState<Record<string, ProgressResponse>>({});
   const [loading, setLoading] = useState(true);
-  const previousProgressRef = useRef<Record<string, ProgressResponse>>(
-    ENABLE_MOCK_PROCESS
-      ? { 'process-mock-12345': MOCK_PROCESS_JOB }
-      : {}
-  );
+  const previousProgressRef = useRef<Record<string, ProgressResponse>>({});
   const isMountedRef = useRef(true);
   const subscribersRef = useRef<Set<(progress: Record<string, ProgressResponse>, previous: Record<string, ProgressResponse>) => void>>(new Set());
 
@@ -71,15 +46,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       
       if (!isMountedRef.current) return;
 
-      let currentProgress = data.jobs || { [data.status || 'unknown']: data };
-      
-      // Merge mock data if enabled
-      if (ENABLE_MOCK_PROCESS) {
-        currentProgress = {
-          ...currentProgress,
-          'process-mock-12345': MOCK_PROCESS_JOB,
-        };
-      }
+      const currentProgress = data.jobs || { [data.status || 'unknown']: data };
       
       // Update state
       setProgress(currentProgress);
@@ -102,15 +69,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
         try {
           const data = await apiService.getProgress(undefined, false);
           if (isMountedRef.current) {
-            let currentProgress = data.jobs || { [data.status || 'unknown']: data };
-            
-            // Merge mock data if enabled
-            if (ENABLE_MOCK_PROCESS) {
-              currentProgress = {
-                ...currentProgress,
-                'process-mock-12345': MOCK_PROCESS_JOB,
-              };
-            }
+            const currentProgress = data.jobs || { [data.status || 'unknown']: data };
             
             setProgress(currentProgress);
             setLoading(false);
@@ -146,20 +105,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       try {
         const data = await apiService.getProgress(undefined, false);
         if (isMountedRef.current) {
-          let currentProgress: Record<string, ProgressResponse>;
-          if (data.jobs) {
-            currentProgress = data.jobs;
-          } else {
-            currentProgress = { [data.status || 'unknown']: data };
-          }
-          
-          // Merge mock data if enabled
-          if (ENABLE_MOCK_PROCESS) {
-            currentProgress = {
-              ...currentProgress,
-              'process-mock-12345': MOCK_PROCESS_JOB,
-            };
-          }
+          const currentProgress: Record<string, ProgressResponse> = data.jobs || { [data.status || 'unknown']: data };
           
           setProgress(currentProgress);
           previousProgressRef.current = currentProgress;
