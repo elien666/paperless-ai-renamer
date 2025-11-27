@@ -197,8 +197,8 @@ When a document is uploaded to Paperless, the following happens automatically:
 
 1. **Document Upload**: You upload a file (e.g., "Scan.pdf" or "IMG_1234.jpg") to Paperless
 2. **Paperless Processing**: Paperless processes the document (OCR, text extraction, etc.)
-3. **Webhook Notification**: Paperless sends a webhook POST request to your service with `{"document_id": 839, ...}`
-4. **Immediate Response**: Your service responds immediately with `{"status": "processing_started", "document_id": 839}` (non-blocking)
+3. **Webhook Notification**: Paperless sends a webhook POST request to your service with a document URL (e.g., `{"url": "https://paperless.tty7.de/documents/839/"}` or just the URL string)
+4. **Immediate Response**: Your service extracts the document ID from the URL and responds immediately with `{"status": "processing_started", "document_id": 839}` (non-blocking)
 5. **Background Processing**: The service processes the document in the background:
    - Fetches document details from Paperless API
    - Detects document type (image vs. text) via MIME type
@@ -297,7 +297,7 @@ For complete API documentation, see:
 | `GET` | `/find-outliers` | Find documents isolated in vector space (poor titles) | `k_neighbors` (default: 5): Number of neighbors to check<br>`limit` (default: 50): Max results to return |
 | `POST` | `/process-documents` | Process specific document IDs for renaming | Body: `{"document_ids": [123, 456, ...]}` |
 | `GET` | `/progress` | Get progress of scan and index jobs | `job_id` (optional): Specific job ID (use `index` for index job), or omit for all jobs |
-| `POST` | `/webhook` | Webhook endpoint for Paperless-ngx | Body: `{"document_id": 123, ...}` |
+| `POST` | `/webhook` | Webhook endpoint for Paperless-ngx | Body: `{"url": "https://paperless.tty7.de/documents/123/"}` or URL string |
 
 ### Endpoint Details
 

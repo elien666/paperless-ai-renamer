@@ -256,15 +256,64 @@ def test_webhook_endpoint_with_document_id(app_client, mock_services):
         mock_archive.assert_called_once_with(123)
 
 def test_webhook_endpoint_without_document_id(app_client):
-    """Test /api/webhook endpoint without document_id."""
+    """Test /api/webhook endpoint without document_id or URL."""
     response = app_client.post(
         "/api/webhook",
-        json={"task_id": "some_task"}
+        json={"event": "document_added"}
     )
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ignored"
     assert "missing_document_id" in data["reason"]
+
+def test_webhook_endpoint_with_url(app_client, mock_services):
+    """Test /api/webhook endpoint with document URL."""
+    mock_paperless, mock_ai = mock_services
+    mock_paperless_instance = MagicMock()
+    mock_paperless_instance.get_document.return_value = {
+        "id": 1602,
+        "title": "Test",
+        "content": "Content"
+    }
+    mock_paperless.return_value = mock_paperless_instance
+    
+    # Mock the background task so it doesn't actually run
+    with patch('app.main.archive_webhook_trigger') as mock_archive, \
+         patch('app.main.process_document_with_progress') as mock_process:
+        response = app_client.post(
+            "/api/webhook",
+            json={"url": "https://paperless.tty7.de/documents/1602/"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "processing_started"
+        assert data["document_id"] == 1602
+        mock_archive.assert_called_once_with(1602)
+
+def test_webhook_endpoint_with_url_string(app_client, mock_services):
+    """Test /api/webhook endpoint with URL as string payload."""
+    mock_paperless, mock_ai = mock_services
+    mock_paperless_instance = MagicMock()
+    mock_paperless_instance.get_document.return_value = {
+        "id": 1602,
+        "title": "Test",
+        "content": "Content"
+    }
+    mock_paperless.return_value = mock_paperless_instance
+    
+    # Mock the background task so it doesn't actually run
+    with patch('app.main.archive_webhook_trigger') as mock_archive, \
+         patch('app.main.process_document_with_progress') as mock_process:
+        # FastAPI will parse a JSON string as a string value
+        response = app_client.post(
+            "/api/webhook",
+            json="https://paperless.tty7.de/documents/1602/"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "processing_started"
+        assert data["document_id"] == 1602
+        mock_archive.assert_called_once_with(1602)
 
 def test_find_outliers_endpoint_success(app_client, mock_services):
     """Test /api/find-outliers endpoint success."""
