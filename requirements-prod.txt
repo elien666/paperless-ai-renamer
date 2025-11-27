@@ -8,8 +8,8 @@ requests
 httpx
 
 # ML/AI dependencies (needed for production)
+# Note: Embeddings are now handled via Ollama API, not sentence-transformers
 chromadb>=1.3.5
-sentence-transformers
 
 # Scheduler
 apscheduler

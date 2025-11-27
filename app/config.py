@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     BAD_TITLE_REGEX: str = "^Scan.*"
     DRY_RUN: bool = False
     
-    # Embedding model settings
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
+    # Embedding model settings (Ollama model name)
+    EMBEDDING_MODEL: str = "chroma/all-minilm-l6-v2-f32"
     CHROMA_DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
     
     # LLM settings

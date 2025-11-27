@@ -1,5 +1,4 @@
 import chromadb
-from sentence_transformers import SentenceTransformer
 import requests
 import logging
 from typing import List, Dict, Any, Optional
@@ -10,9 +9,8 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        # Initialize Embedding Model
-        logger.info(f"Loading embedding model: {settings.EMBEDDING_MODEL}")
-        self.embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL)
+        # Embedding model is now handled via Ollama API
+        logger.info(f"Using Ollama embedding model: {settings.EMBEDDING_MODEL}")
         
         # Initialize ChromaDB
         logger.info(f"Initializing ChromaDB at {settings.CHROMA_DB_PATH}")
@@ -20,8 +18,23 @@ class AIService:
         self.collection = self.chroma_client.get_or_create_collection(name="paperless_docs")
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a given text."""
-        return self.embedding_model.encode(text).tolist()
+        """Generate embedding for a given text using Ollama API."""
+        try:
+            payload = {
+                "model": settings.EMBEDDING_MODEL,
+                "prompt": text
+            }
+            response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/embeddings", json=payload)
+            response.raise_for_status()
+            result = response.json()
+            embedding = result.get("embedding", [])
+            if not embedding:
+                raise ValueError("Empty embedding returned from Ollama")
+            return embedding
+        except requests.RequestException as e:
+            error_msg = f"Error calling Ollama for embeddings: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def add_document_to_index(self, doc_id: str, content: str, title: str):
         """Add a document to the vector index."""
