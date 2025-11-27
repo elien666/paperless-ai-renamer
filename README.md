@@ -1,6 +1,4 @@
-[![Build and Push Docker Image](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml)
-
-[![Pytest](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml)
+[![Build and Push Docker Image](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml) [![Pytest](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml) [![Frontend Type Check](https://github.com/elien666/paperless-ai-renamer/actions/workflows/frontend-check.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/frontend-check.yml)
 
 # Paperless AI Renamer
 
