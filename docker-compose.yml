@@ -1,0 +1,51 @@
+services:
+  app:
+    # For local testing: build from local Dockerfile
+    build: .
+    # For production: use pre-built image from GitHub Container Registry
+    # image: ghcr.io/elien666/paperless-agent-rename:latest
+    # Replace elien666 with your GitHub username or organization
+    container_name: paperless-ai-renamer
+    environment:
+      - PAPERLESS_API_URL=${PAPERLESS_API_URL:-http://paperless-webserver:8000}
+      - PAPERLESS_API_TOKEN=${PAPERLESS_API_TOKEN}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - LLM_MODEL=${LLM_MODEL:-llama3}
+      - VISION_MODEL=${VISION_MODEL:-moondream}
+      - ENABLE_SCHEDULER=${ENABLE_SCHEDULER:-False}
+      - BAD_TITLE_REGEX=${BAD_TITLE_REGEX:-^(Scan|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}).*}
+      - DRY_RUN=${DRY_RUN:-False}
+      - LANGUAGE=${LANGUAGE:-German}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - CHROMA_DB_PATH=${CHROMA_DB_PATH:-/app/data/chroma}
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+    #depends_on:
+    #  - ollama
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+    # Enable for embedded Ollama.
+    # See official documentation for more details: https://docs.ollama.com/quickstart
+    # 
+    #ollama:
+    #  image: ollama/ollama:latest
+    #  container_name: ollama
+    #  volumes:
+    #    - ollama_data:/root/.ollama
+    #  environment:
+    #    - OLLAMA_GPU_OVERHEAD=0
+    #  restart: unless-stopped
+    # Uncomment the following section to enable GPU support (requires NVIDIA Container Toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:
