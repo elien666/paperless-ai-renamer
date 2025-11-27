@@ -101,6 +101,12 @@ export const apiService = {
     return response.data;
   },
 
+  // Clear error archive
+  async clearErrorArchive(): Promise<{ status: string; deleted_count: number }> {
+    const response = await api.delete('/archive', { params: { type: 'error' } });
+    return response.data;
+  },
+
   // Find outliers
   async findOutliers(kNeighbors: number = 5, limit: number = 50): Promise<OutlierResponse> {
     const response = await api.get('/find-outliers', {

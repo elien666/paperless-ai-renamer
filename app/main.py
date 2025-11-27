@@ -33,7 +33,8 @@ from app.services.archive import (
     archive_title_rename,
     archive_webhook_trigger,
     archive_error,
-    query_archive
+    query_archive,
+    clear_error_archive
 )
 
 # Setup Logging
@@ -798,6 +799,27 @@ async def get_archive(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error querying archive: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.delete("/archive")
+async def delete_archive(type: str):
+    """
+    Clear an archive type. Currently only supports clearing the error archive.
+    
+    Args:
+        type: Archive type - must be 'error' to clear the error archive
+    """
+    if type != 'error':
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only 'error' archive type can be cleared. Received: {type}"
+        )
+    
+    try:
+        deleted_count = clear_error_archive()
+        return {"status": "success", "deleted_count": deleted_count}
+    except Exception as e:
+        logger.error(f"Error clearing error archive: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Mount API router with /api prefix

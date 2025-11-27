@@ -227,6 +227,24 @@ def archive_error(job_type: str, error_message: str, job_id: Optional[str] = Non
         conn.commit()
         conn.close()
 
+def clear_error_archive() -> int:
+    """Clear all errors from the error_archive table.
+    
+    Returns:
+        Number of deleted rows
+    """
+    db_path = get_db_path()
+    
+    with db_lock:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM error_archive")
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"Cleared {deleted_count} error(s) from error_archive")
+        return deleted_count
+
 def query_archive(
     archive_type: str,
     page: int = 1,

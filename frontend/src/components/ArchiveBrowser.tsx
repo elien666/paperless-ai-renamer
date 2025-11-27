@@ -5,6 +5,7 @@ import { useProgress } from '../contexts/ProgressContext';
 import { formatDistanceToNow } from 'date-fns';
 import { IoIosHeartEmpty } from 'react-icons/io';
 import { FaFileAlt } from 'react-icons/fa';
+import { GiBroom } from 'react-icons/gi';
 
 type ArchiveType = 'rename' | 'index' | 'scan' | 'error';
 
@@ -40,6 +41,8 @@ export default function ArchiveBrowser() {
   });
   const { subscribe } = useProgress();
   const [toastMessage, setToastMessage] = useState<{ type: 'error'; text: string } | null>(null);
+  const [isClearing, setIsClearing] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
 
   const fetchArchive = useCallback(async (type: ArchiveType, page: number, append: boolean = false, isInitial: boolean = false) => {
     // Prevent concurrent requests for the same type
@@ -163,21 +166,26 @@ export default function ArchiveBrowser() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe]);
 
-  // Handle ESC key to close error modal
+  // Handle ESC key to close modals
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && selectedError) {
-        setSelectedError(null);
+      if (event.key === 'Escape') {
+        if (selectedError) {
+          setSelectedError(null);
+        }
+        if (showClearModal) {
+          setShowClearModal(false);
+        }
       }
     };
 
-    if (selectedError) {
+    if (selectedError || showClearModal) {
       document.addEventListener('keydown', handleEsc);
       return () => {
         document.removeEventListener('keydown', handleEsc);
       };
     }
-  }, [selectedError]);
+  }, [selectedError, showClearModal]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -246,29 +254,82 @@ export default function ArchiveBrowser() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  const handleClearIssues = () => {
+    if (errorItems.length === 0) return;
+    setShowClearModal(true);
+  };
+
+  const confirmClearIssues = async () => {
+    setShowClearModal(false);
+    setIsClearing(true);
+    setError(null);
+    
+    try {
+      await apiService.clearErrorArchive();
+      // Clear the error items and reset pagination
+      setErrorItems([]);
+      setCurrentPage(prev => ({ ...prev, error: 1 }));
+      setHasMore(prev => ({ ...prev, error: true }));
+      // Optionally refresh to ensure UI is in sync
+      fetchArchive('error', 1, false, true);
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to clear issues log';
+      setError(errorMessage);
+      setToastMessage({
+        type: 'error',
+        text: errorMessage
+      });
+      setTimeout(() => setToastMessage(null), 5000);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Tabs */}
       <div className="mb-4 flex-none">
-        <div className="tabs tabs-border">
-          <button
-            className={`tab ${activeTab === 'rename' ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab('rename')}
-          >
-            Renaming
-          </button>
-          <button
-            className={`tab ${activeTab === 'jobs' ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab('jobs')}
-          >
-            Jobs
-          </button>
-          <button
-            className={`tab ${activeTab === 'issues' ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab('issues')}
-          >
-            Issues
-          </button>
+        <div className="flex items-center justify-between gap-4">
+          <div className="tabs tabs-border flex-1">
+            <button
+              className={`tab ${activeTab === 'rename' ? 'tab-active' : ''}`}
+              onClick={() => setActiveTab('rename')}
+            >
+              Renaming
+            </button>
+            <button
+              className={`tab ${activeTab === 'jobs' ? 'tab-active' : ''}`}
+              onClick={() => setActiveTab('jobs')}
+            >
+              Jobs
+            </button>
+            <button
+              className={`tab ${activeTab === 'issues' ? 'tab-active' : ''}`}
+              onClick={() => setActiveTab('issues')}
+            >
+              Issues
+            </button>
+          </div>
+          {activeTab === 'issues' && errorItems.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm btn-neutral"
+              onClick={handleClearIssues}
+              disabled={isClearing}
+            >
+              {isClearing ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Clearing...
+                </>
+              ) : (
+                <>
+                  <GiBroom className="w-4 h-4" />
+                  Clear All
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -512,6 +573,50 @@ export default function ArchiveBrowser() {
           )}
         </div>
       </div>
+
+      {/* Clear Issues Confirmation Modal */}
+      {showClearModal && (
+        <dialog open className="modal modal-open">
+          <div className="modal-box">
+            <form method="dialog">
+              <button
+                type="button"
+                className="btn btn-circle btn-ghost absolute right-2 top-2"
+                onClick={() => setShowClearModal(false)}
+              >
+                <span className="text-xl">✕</span>
+              </button>
+            </form>
+            <h3 className="font-bold text-lg mb-4">Clear Issues Log</h3>
+            <p className="py-4">
+              Are you sure you want to clear all {errorItems.length} error{errorItems.length !== 1 ? 's' : ''} from the issues log? This action cannot be undone.
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={confirmClearIssues}
+                disabled={isClearing}
+              >
+                {isClearing ? (
+                  <>
+                    <span className="loading loading-spinner loading-xs"></span>
+                    Clearing...
+                  </>
+                ) : (
+                  <>
+                    <GiBroom className="w-4 h-4" />
+                    Clear All
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop" onClick={() => setShowClearModal(false)}>
+            <button>close</button>
+          </form>
+        </dialog>
+      )}
 
       {/* Error Detail Modal */}
       {selectedError && (
