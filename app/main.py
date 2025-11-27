@@ -5,7 +5,7 @@ import os
 from threading import Lock, Event as ThreadEvent
 import uuid
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import asyncio
 import time
@@ -269,7 +269,7 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
             with progress_lock:
                 if job_id in jobs:
                     jobs[job_id]["status"] = "completed"
-                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                     # Archive the scan job
                     archive_scan_job(
                         total_documents=len(all_docs),
@@ -290,7 +290,7 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
                 if job_id in jobs:
                     jobs[job_id]["status"] = "failed"
                     jobs[job_id]["error"] = error_message
-                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                     # Archive the failed scan job
                     archive_scan_job(
                         total_documents=len(all_docs) if 'all_docs' in locals() else 0,
@@ -354,7 +354,7 @@ async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None
             "status": "running",
             "total": 0,
             "processed": 0,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "newer_than": newer_than,
             "last_reported": time.time()
         }
@@ -392,7 +392,7 @@ async def trigger_index(background_tasks: BackgroundTasks, older_than: str = Non
             "status": "running",
             "total": 0,
             "processed": 0,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "older_than": older_than,
             "last_reported": time.time()
         }
@@ -453,7 +453,7 @@ def process_documents_batch(document_ids: list, job_id: str):
         with progress_lock:
             if job_id in jobs:
                 jobs[job_id]["status"] = "completed"
-                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                 _signal_progress_update(job_id)
                 _signal_all_jobs_update()
     except Exception as e:
@@ -465,7 +465,7 @@ def process_documents_batch(document_ids: list, job_id: str):
             if job_id in jobs:
                 jobs[job_id]["status"] = "failed"
                 jobs[job_id]["error"] = error_message
-                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                 _signal_progress_update(job_id)
                 _signal_all_jobs_update()
 
@@ -500,7 +500,7 @@ async def process_documents(background_tasks: BackgroundTasks, request: Request)
                 "status": "running",
                 "total": len(document_ids),
                 "processed": 0,
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "errors": [],
                 "last_reported": time.time()
             }
@@ -632,7 +632,7 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     jobs[job_id]["indexed"] = count
                     jobs[job_id]["skipped_scan"] = skipped_scan
                     jobs[job_id]["cleaned"] = cleaned
-                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                     # Archive the index job
                     archive_index_job(
                         documents_indexed=count,
@@ -650,7 +650,7 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                 if job_id in jobs:
                     jobs[job_id]["status"] = "failed"
                     jobs[job_id]["error"] = error_message
-                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                     # Archive the failed index job
                     archive_index_job(
                         documents_indexed=count if 'count' in locals() else 0,
@@ -687,7 +687,7 @@ def process_document_with_progress(doc_id: int, job_id: str):
         with progress_lock:
             if job_id in jobs:
                 jobs[job_id]["status"] = "completed"
-                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                 _signal_progress_update(job_id)
                 _signal_all_jobs_update()
     except Exception as e:
@@ -699,7 +699,7 @@ def process_document_with_progress(doc_id: int, job_id: str):
             if job_id in jobs:
                 jobs[job_id]["status"] = "failed"
                 jobs[job_id]["error"] = error_message
-                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                 # Ensure processed is set if not already set by process_document error handler
                 if jobs[job_id]["processed"] == 0:
                     jobs[job_id]["processed"] = 1
@@ -835,7 +835,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
                     "status": "running",
                     "total": 1,
                     "processed": 0,
-                    "created_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                     "document_id": doc_id,
                     "document_title": document_title,
                     "errors": [],
@@ -1019,6 +1019,77 @@ async def delete_archive(type: str):
         return {"status": "success", "deleted_count": deleted_count}
     except Exception as e:
         logger.error(f"Error clearing error archive: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _complete_fake_job_after_delay(job_id: str, delay_seconds: int = 10):
+    """Helper function to complete a fake job after a delay."""
+    await asyncio.sleep(delay_seconds)
+    with progress_lock:
+        if job_id in jobs and jobs[job_id].get("status") == "running":
+            jobs[job_id]["status"] = "completed"
+            jobs[job_id]["processed"] = jobs[job_id].get("total", jobs[job_id].get("processed", 0))
+            jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            _signal_progress_update(job_id)
+            _signal_all_jobs_update()
+            logger.info(f"Fake job {job_id} completed after {delay_seconds} seconds")
+
+@api_router.post("/dev/fake-progress")
+async def create_fake_progress():
+    """
+    Development endpoint to create fake running progress jobs for screenshots.
+    This creates realistic-looking progress jobs that appear to be actively running.
+    Jobs will automatically complete after 10 seconds.
+    """
+    try:
+        # Create a fake process job
+        process_job_id = f"process-{uuid.uuid4()}"
+        with progress_lock:
+            jobs[process_job_id] = {
+                "status": "running",
+                "total": 10,
+                "processed": 5,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "document_id": 5432,
+                "document_title": "Invoice from Acme Corp - January 2024",
+                "errors": [],
+                "last_reported": time.time()
+            }
+            thread_event = ThreadEvent()
+            async_event = asyncio.Event()
+            progress_events[process_job_id] = (thread_event, async_event)
+        
+        # Create a fake index job
+        index_job_id = "index"
+        with progress_lock:
+            # Only create if index job doesn't already exist
+            if index_job_id not in jobs or jobs[index_job_id].get("status") != "running":
+                jobs[index_job_id] = {
+                    "status": "running",
+                    "total": 300,
+                    "processed": 150,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_reported": time.time()
+                }
+                thread_event = ThreadEvent()
+                async_event = asyncio.Event()
+                progress_events[index_job_id] = (thread_event, async_event)
+        
+        _signal_all_jobs_update()
+        
+        # Schedule jobs to complete after 10 seconds
+        asyncio.create_task(_complete_fake_job_after_delay(process_job_id, 10))
+        asyncio.create_task(_complete_fake_job_after_delay(index_job_id, 10))
+        
+        return {
+            "status": "success",
+            "message": "Fake progress jobs created (will complete in 10 seconds)",
+            "jobs": {
+                "process": process_job_id,
+                "index": index_job_id
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error creating fake progress: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Mount API router with /api prefix

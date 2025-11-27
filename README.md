@@ -2,18 +2,19 @@
 
 # Paperless AI Renamer
 
-A local, Dockerized AI-powered service that integrates with Paperless-ngx to automatically rename documents using a local LLM and RAG (Retrieval Augmented Generation).
+A local, Dockerized AI-powered service that automatically integrates with [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) via webhooks to rename documents using a local LLM and RAG (Retrieval Augmented Generation). A modern web UI and REST API are available to manage vector database indexing, manually scan for documents, and trigger title generation.
 
-![Web UI Screenshot](ui-screenshot.png)
+https://github.com/user-attachments/assets/491418f7-ca89-488f-b813-86f089f37fc6
 
 ## Features
 
+- **Automatic Integration**: Seamlessly integrates with [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) via webhooks - documents are automatically processed when added
 - **Local LLM Integration**: Uses Ollama for intelligent title generation
 - **Vision Model Support**: Automatically detects and processes image documents using vision LLMs
 - **RAG-Based Learning**: Learns from your existing "good" document titles
-- **Webhook Support**: Processes documents automatically when added to Paperless
-- **Manual Controls**: Trigger scans and indexing on-demand via API
-- **Web UI**: Modern React-based interface for monitoring progress, browsing archive, and processing documents
+- **Web UI**: Modern React-based interface for monitoring progress, browsing archive, managing vector DB indexing, and processing documents
+- **REST API**: Full REST API for programmatic access to vector DB indexing, manual scanning, and title generation
+- **Manual Controls**: Trigger scans and indexing on-demand via UI or API
 - **Dry Run Mode**: Preview changes without modifying documents
 - **Date Filtering**: Process documents by date range
 - **Configurable Prompts**: Customize the AI's instructions
@@ -80,57 +81,160 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # For embeddings (vector search)
    ```
 
-5. **Build Your Baseline** (Index existing "good" documents):
+5. **Access the Web UI**:
+   Open your browser and navigate to `http://localhost:8337` to access the web interface.
+
+6. **Build Your Baseline** (Index existing "good" documents):
+   You can do this through the web UI using the (+) Floating Action Button (FAB), or via API:
    ```bash
    curl -X POST "http://localhost:8337/index?older_than=2024-01-01"
    ```
 
-6. **Access the Web UI**:
-   Open your browser and navigate to `http://localhost:8337` to access the web interface.
-
 7. **Test with a Scan**:
+   You can do this through the web UI using the (+) Floating Action Button (FAB), or via API:
    ```bash
    curl -X POST "http://localhost:8337/scan?newer_than=2024-01-01"
    ```
-   Or use the web UI to trigger scans and monitor progress.
 
 8. **Monitor Logs**:
    ```bash
-   docker-compose logs -f app
+   docker-compose logs -f renamer
    ```
 
-## Building the Docker Image Locally
+9. **Configure Webhook Integration** (Optional but Recommended):
+   
+   The service automatically integrates with [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) via webhooks, processing documents immediately when they're added. To enable automatic processing:
+   
+   1. Go to Paperless Settings → **Workflows**
+   2. Click **Create Workflow** to create a new workflow
+   3. Configure the workflow:
+      - **Sort Order**: Set to a high value (e.g., `999`) so it runs at the end
+      - **Triggers**: 
+        - Select **Document added** (recommended for automatic processing)
+        - OR select **Document updated** (if you want to manually trigger via tag)
+        - If using "Document updated", add a condition: **Tag** → **is** → `AI Rename` (or your preferred tag name)
+      - **Actions**:
+        - Click **Add Action** → Select **Webhook URL**
+        - Enter webhook URL: `http://renamer:8000/webhook` (use the service name from your docker-compose.yml)
+        - Enable **Use parameters for webhook body**
+        - Enable **Send webhook payload as JSON**
+        - Add webhook parameter:
+          - **Parameter Name**: `webhook_id`
+          - **Value**: `{{doc_url}}`
+        - If you used a tag trigger (e.g., "AI Rename"), optionally add another action:
+          - Click **Add Action** → Select **Remove Tag**
+          - Select the tag you used (e.g., `AI Rename`)
+   
+   ![Paperless Webhook Configuration](docs/paperless-webhook.png)
+   
+   **How it works**: When a document is uploaded to Paperless, the following happens automatically:
+   - Paperless processes the document (OCR, text extraction, etc.)
+   - The workflow triggers and sends a webhook POST request to your service with the document URL
+   - Your service processes the document in the background:
+     - **For Images**: Downloads image → Vision model analyzes → Generates title
+     - **For Text**: Finds similar documents (RAG) → Text LLM generates title
+   - If a better title is generated, the document is updated in Paperless
+   - The new title is added to the vector database for future learning
+   
+   **Note**: If you use "Document updated" with a tag trigger, you can manually trigger processing by adding the tag to any document in Paperless.
 
-If you want to build the Docker image locally instead of using the pre-built image from GitHub Container Registry:
+### Getting Your Paperless API Token
 
-1. **Build the image**:
-   ```bash
-   docker build -t paperless-agent-rename .
-   ```
+To obtain your Paperless API token:
 
-2. **Update `docker-compose.yml`**:
-   Replace the `image:` line with `build: .`:
-   ```yaml
-   services:
-     app:
-       build: .
-       # image: ghcr.io/elien666/paperless-ai-renamer:latest  # Comment out or remove this line
-       container_name: paperless-ai-renamer
-       # ... rest of configuration
-   ```
+1. **Log in to Paperless-ngx**: Open your [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) web interface in a browser
+2. **Navigate to Settings**: Click on your user profile (usually in the top right) → **Settings**
+3. **Go to API Tokens**: In the settings menu, click on **API Tokens** (or **Tokens**)
+4. **Create a New Token**:
+   - Click **Create Token** or **Add Token**
+   - Give it a descriptive name (e.g., "AI Renamer Service")
+   - Click **Create** or **Save**
+5. **Copy the Token**: The token will be displayed once. **Copy it immediately** - you won't be able to see it again after closing the dialog
+6. **Add to docker-compose.yml**: Paste the token as the value for `PAPERLESS_API_TOKEN` in your `docker-compose.yml` file
 
-3. **Start the services**:
-   ```bash
-   docker-compose up -d
-   ```
+**Note**: If you lose the token, you'll need to create a new one. Old tokens cannot be retrieved, only regenerated.
 
-Alternatively, you can tag your local build to match the expected image name:
-```bash
-docker build -t ghcr.io/elien666/paperless-ai-renamer:latest .
+## Configuration
+
+Configure the service by editing the `environment` section in `docker-compose.yml`:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PAPERLESS_API_URL` | `http://paperless-webserver:8000` | URL of your [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) instance |
+| `PAPERLESS_API_TOKEN` | *Required* | Your Paperless API Token |
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | URL of the Ollama service |
+| `LLM_MODEL` | `llama3` | The Ollama model to use |
+| `ENABLE_SCHEDULER` | `False` | Enable background job to periodically search for bad titles |
+| `CRON_SCHEDULE` | `*/30 * * * *` | Cron expression for the scheduler (if enabled) |
+| `BAD_TITLE_REGEX` | `^Scan.*` | Regex pattern to identify documents that need renaming |
+| `DRY_RUN` | `False` | If `True`, logs proposed changes without updating Paperless |
+| `PROMPT_TEMPLATE` | *See default in code* | Custom prompt for the LLM. Must include `{language}`, `{examples}`, `{content}`, `{filename}` |
+| `VISION_MODEL` | `moondream` | The Ollama vision model to use for image documents |
+| `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
+| `EMBEDDING_MODEL` | `chroma/all-minilm-l6-v2-f32` | Ollama embedding model name (e.g., `chroma/all-minilm-l6-v2-f32`) |
+| `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
+
+### Example: Custom Regex for Bad Titles
+
+To match documents starting with "Scan" OR a date:
+```yaml
+- BAD_TITLE_REGEX=^(Scan|\\d{4}[-/]\\d{2}[-/]\\d{2}|\\d{2}[-/]\\d{2}[-/]\\d{4}).*
 ```
-Replace `elien666` with your GitHub username or organization.
 
-## Usage
+### Example: Custom Prompt Template
+
+```yaml
+- PROMPT_TEMPLATE=Analyze this document: {content}. The original file is {filename}. Based on these examples: {examples}, suggest a better title in {language}.
+```
+
+Note: The prompt template must include `{language}`, `{examples}`, `{content}`, and `{filename}` placeholders.
+
+### Example: Change Language
+
+To generate titles in English instead of German:
+```yaml
+- LANGUAGE=English
+```
+
+Or in French:
+```yaml
+- LANGUAGE=French
+```
+
+## Troubleshooting
+
+### No results when scanning
+- Check that `BAD_TITLE_REGEX` is properly escaped in `docker-compose.yml`
+- Verify the regex pattern matches your document titles
+- Check logs: `docker-compose logs -f renamer`
+
+### Embedding model not found
+Ensure you've pulled the embedding model in Ollama:
+```bash
+docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32
+```
+The embedding model is used for finding similar documents to provide context for title generation.
+
+### LLM not responding
+Ensure you've pulled all required models in Ollama:
+```bash
+docker exec -it ollama ollama pull llama3
+docker exec -it ollama ollama pull moondream  # Required for image documents
+docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # Required for embeddings
+```
+
+### MIME type not detected
+If the log shows empty MIME types (e.g., `MIME: `), the service will automatically:
+1. Try to get the MIME type from the download response headers
+2. Infer from the file extension as a fallback
+
+If image documents are still not being processed, check:
+- The document is actually an image file (jpg, png, etc.)
+- The vision model is pulled: `docker exec -it ollama ollama pull moondream`
+- Check logs for any errors during image processing
+
+<details>
+<summary><h2>API Usage</h2></summary>
 
 ### Manual Scan
 Trigger a search for documents with "bad" titles:
@@ -181,104 +285,17 @@ curl -X POST "http://localhost:8337/process-documents" \
   -d '{"document_ids": [123, 456, 789]}'
 ```
 
-### Webhook Integration
-
-Configure Paperless-ngx to send webhooks:
-1. Go to Paperless Settings → Webhooks
-2. Add webhook URL: `http://renamer:8000/webhook` (use the service name from your docker-compose.yml)
-3. Set trigger to `DOCUMENT_ADDED` or `DOCUMENT_CREATED`
-
-#### Webhook Flow Explained
-
-When a document is uploaded to Paperless, the following happens automatically:
-
-1. **Document Upload**: You upload a file (e.g., "Scan.pdf" or "IMG_1234.jpg") to Paperless
-2. **Paperless Processing**: Paperless processes the document (OCR, text extraction, etc.)
-3. **Webhook Notification**: Paperless sends a webhook POST request to your service with a document URL (e.g., `{"url": "https://paperless.tty7.de/documents/839/"}` or just the URL string)
-4. **Immediate Response**: Your service extracts the document ID from the URL and responds immediately with `{"status": "processing_started", "document_id": 839}` (non-blocking)
-5. **Background Processing**: The service processes the document in the background:
-   - Fetches document details from Paperless API
-   - Detects document type (image vs. text) via MIME type
-   - **For Images**: Downloads image → Vision model analyzes → Generates title in configured language
-   - **For Text**: Finds similar documents (RAG) → Text LLM generates title in configured language
-6. **Title Update**: If a better title is generated, the document is updated in Paperless
-7. **Indexing**: The new title is added to the vector database for future learning
-
-**Key Points**:
-- Processing happens asynchronously (doesn't block Paperless)
-- Images automatically use the vision model
-- Text documents use RAG with the text LLM
-- All titles are generated in your configured language (default: German)
-
 ### Health Check
 ```bash
 curl http://localhost:8337/health
 ```
 
-## Configuration
+</details>
 
-Configure the service by editing the `environment` section in `docker-compose.yml`:
+<details>
+<summary><h2>API Documentation</h2></summary>
 
-| Variable | Default | Description |
-| :--- | :--- | :--- |
-| `PAPERLESS_API_URL` | `http://paperless-webserver:8000` | URL of your Paperless-ngx instance |
-| `PAPERLESS_API_TOKEN` | *Required* | Your Paperless API Token |
-| `OLLAMA_BASE_URL` | `http://ollama:11434` | URL of the Ollama service |
-| `LLM_MODEL` | `llama3` | The Ollama model to use |
-| `ENABLE_SCHEDULER` | `False` | Enable background job to periodically search for bad titles |
-| `CRON_SCHEDULE` | `*/30 * * * *` | Cron expression for the scheduler (if enabled) |
-| `BAD_TITLE_REGEX` | `^Scan.*` | Regex pattern to identify documents that need renaming |
-| `DRY_RUN` | `False` | If `True`, logs proposed changes without updating Paperless |
-| `PROMPT_TEMPLATE` | *See default in code* | Custom prompt for the LLM. Must include `{language}`, `{examples}`, `{content}`, `{filename}` |
-| `VISION_MODEL` | `moondream` | The Ollama vision model to use for image documents |
-| `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
-| `EMBEDDING_MODEL` | `chroma/all-minilm-l6-v2-f32` | Ollama embedding model name (e.g., `chroma/all-minilm-l6-v2-f32`) |
-| `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
-
-### Getting Your Paperless API Token
-
-To obtain your Paperless API token:
-
-1. **Log in to Paperless-ngx**: Open your Paperless web interface in a browser
-2. **Navigate to Settings**: Click on your user profile (usually in the top right) → **Settings**
-3. **Go to API Tokens**: In the settings menu, click on **API Tokens** (or **Tokens**)
-4. **Create a New Token**:
-   - Click **Create Token** or **Add Token**
-   - Give it a descriptive name (e.g., "AI Renamer Service")
-   - Click **Create** or **Save**
-5. **Copy the Token**: The token will be displayed once. **Copy it immediately** - you won't be able to see it again after closing the dialog
-6. **Add to docker-compose.yml**: Paste the token as the value for `PAPERLESS_API_TOKEN` in your `docker-compose.yml` file
-
-**Note**: If you lose the token, you'll need to create a new one. Old tokens cannot be retrieved, only regenerated.
-
-### Example: Custom Regex for Bad Titles
-
-To match documents starting with "Scan" OR a date:
-```yaml
-- BAD_TITLE_REGEX=^(Scan|\\d{4}[-/]\\d{2}[-/]\\d{2}|\\d{2}[-/]\\d{2}[-/]\\d{4}).*
-```
-
-### Example: Custom Prompt Template
-
-```yaml
-- PROMPT_TEMPLATE=Analyze this document: {content}. The original file is {filename}. Based on these examples: {examples}, suggest a better title in {language}.
-```
-
-Note: The prompt template must include `{language}`, `{examples}`, `{content}`, and `{filename}` placeholders.
-
-### Example: Change Language
-
-To generate titles in English instead of German:
-```yaml
-- LANGUAGE=English
-```
-
-Or in French:
-```yaml
-- LANGUAGE=French
-```
-
-## API Documentation
+The service provides a comprehensive REST API for managing vector database indexing, manual scanning, and title generation. All functionality available in the web UI is also accessible via the REST API.
 
 For complete API documentation, see:
 - **OpenAPI Specification**: [`openapi.json`](openapi.json) - Full API schema in OpenAPI 3.1.0 format
@@ -294,7 +311,7 @@ For complete API documentation, see:
 | `GET` | `/find-outliers` | Find documents isolated in vector space (poor titles) | `k_neighbors` (default: 5): Number of neighbors to check<br>`limit` (default: 50): Max results to return |
 | `POST` | `/process-documents` | Process specific document IDs for renaming | Body: `{"document_ids": [123, 456, ...]}` |
 | `GET` | `/progress` | Get progress of scan and index jobs | `job_id` (optional): Specific job ID (use `index` for index job), or omit for all jobs |
-| `POST` | `/webhook` | Webhook endpoint for Paperless-ngx | Body: `{"url": "https://paperless.tty7.de/documents/123/"}` or URL string |
+| `POST` | `/webhook` | Webhook endpoint for [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) | Body: `{"url": "https://paperless.tty7.de/documents/123/"}` or URL string |
 
 ### Endpoint Details
 
@@ -360,9 +377,12 @@ Progress response for index job includes:
 - `older_than`: Date filter used (if any)
 
 #### `POST /webhook`
-Webhook endpoint for Paperless-ngx. Automatically processes documents when they're added. See [Webhook Integration](#webhook-integration) for setup.
+Webhook endpoint for [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx). Automatically processes documents when they're added. See [Quick Start](#quick-start) step 9 for setup instructions.
 
-## How It Works
+</details>
+
+<details>
+<summary><h2>How It Works</h2></summary>
 
 1. **Indexing Phase**: The service indexes your existing documents with good titles into a vector database (ChromaDB). This builds a knowledge base for RAG (Retrieval Augmented Generation).
 
@@ -386,13 +406,18 @@ Webhook endpoint for Paperless-ngx. Automatically processes documents when they'
 
 6. **Learning**: The new title is added to the vector database for future RAG retrieval, improving title generation over time.
 
-## Architecture
+### Architecture
 
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌─────────────┐
 │  Paperless-ngx  │─────▶│  AI Renamer API  │─────▶│   Ollama    │
-│                 │      │   (FastAPI)      │      │   (LLM)     │
-└─────────────────┘      └──────────────────┘      └─────────────┘
+│  (https://      │      │   (FastAPI)      │      │   (LLM)     │
+│   github.com/   │      └──────────────────┘      └─────────────┘
+│   paperless-    │
+│   ngx/          │
+│   paperless-    │
+│   ngx)          │
+└─────────────────┘
                                   │
                                   │
                          ┌────────┴────────┐
@@ -404,57 +429,45 @@ Webhook endpoint for Paperless-ngx. Automatically processes documents when they'
                   └─────────────┘  └──────────────┘
 ```
 
+[Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) is a community-supported document management system.
+
 The frontend is served as static files by FastAPI in production, or runs as a separate dev server during development.
 
-## Troubleshooting
+</details>
 
-### No results when scanning
-- Check that `BAD_TITLE_REGEX` is properly escaped in `docker-compose.yml`
-- Verify the regex pattern matches your document titles
-- Check logs: `docker-compose logs -f app`
+<details>
+<summary><h2>Development</h2></summary>
 
-### Embedding model not found
-Ensure you've pulled the embedding model in Ollama:
+### Building the Docker Image Locally
+
+If you want to build the Docker image locally instead of using the pre-built image from GitHub Container Registry:
+
+1. **Build the image**:
+   ```bash
+   docker build -t paperless-agent-rename .
+   ```
+
+2. **Update `docker-compose.yml`**:
+   Replace the `image:` line with `build: .`:
+   ```yaml
+   services:
+     app:
+       build: .
+       # image: ghcr.io/elien666/paperless-ai-renamer:latest  # Comment out or remove this line
+       container_name: paperless-ai-renamer
+       # ... rest of configuration
+   ```
+
+3. **Start the services**:
+   ```bash
+   docker-compose up -d
+   ```
+
+Alternatively, you can tag your local build to match the expected image name:
 ```bash
-docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32
+docker build -t ghcr.io/elien666/paperless-ai-renamer:latest .
 ```
-The embedding model is used for finding similar documents to provide context for title generation.
-
-### LLM not responding
-Ensure you've pulled all required models in Ollama:
-```bash
-docker exec -it ollama ollama pull llama3
-docker exec -it ollama ollama pull moondream  # Required for image documents
-docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # Required for embeddings
-```
-
-### MIME type not detected
-If the log shows empty MIME types (e.g., `MIME: `), the service will automatically:
-1. Try to get the MIME type from the download response headers
-2. Infer from the file extension as a fallback
-
-If image documents are still not being processed, check:
-- The document is actually an image file (jpg, png, etc.)
-- The vision model is pulled: `docker exec -it ollama ollama pull moondream`
-- Check logs for any errors during image processing
-
-## Web UI
-
-The project includes a modern React-based web interface accessible at `http://localhost:8337` (when running in Docker with the example configuration) or `http://localhost:5173` (in development mode).
-
-### Features
-
-- **Progress View**: Real-time monitoring of active scan and index jobs with progress bars and status updates
-- **Archive Browser**: Browse historical data with two tabs:
-  - **Renaming Tab**: View all document title renames with timestamps
-  - **Jobs Tab**: View index and scan job history
-- **Document Processor**: Manually enter a document ID to trigger processing and renaming
-
-### UI Screenshots
-
-The UI uses DaisyUI components with a clean, modern design that matches the Paperless aesthetic.
-
-## Development
+Replace `elien666` with your GitHub username or organization.
 
 ### Local Development Workflow
 
@@ -558,36 +571,4 @@ This creates a `frontend/dist` directory that will be served by FastAPI in produ
 python -m pytest tests/
 ```
 
-### Project Structure
-```
-.
-├── app/                      # Backend (FastAPI)
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration management
-│   └── services/
-│       ├── ai.py            # AI/LLM/Vector Store
-│       ├── paperless.py     # Paperless API client
-│       └── archive.py       # Archive database
-├── frontend/                 # Frontend (React + Vite)
-│   ├── src/
-│   │   ├── components/      # React components
-│   │   │   ├── ProgressView.tsx
-│   │   │   ├── ArchiveBrowser.tsx
-│   │   │   ├── DocumentProcessor.tsx
-│   │   │   └── Layout.tsx
-│   │   ├── services/
-│   │   │   └── api.ts       # API client
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   └── vite.config.ts
-├── tests/
-│   └── test_flow.py         # Unit tests
-├── docker-compose.yml       # Service orchestration
-├── Dockerfile               # Multi-stage build (frontend + backend)
-└── requirements.txt         # Python dependencies
-```
-
-## License
-
-MIT
+</details>
