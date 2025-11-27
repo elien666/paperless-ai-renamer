@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import asyncio
 import time
+import re
 
 # Global progress tracking
 progress_lock = Lock()
@@ -698,10 +699,36 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.info(f"Received webhook: {payload}")
         
         # Paperless webhook payload structure:
-        # { "task_id": "...", "document_id": 123, ... }
-        # Note: Check actual Paperless webhook docs. Usually it sends document_id.
+        # Paperless may send either:
+        # 1. Direct document_id: { "document_id": 123, ... }
+        # 2. Document URL: { "url": "https://paperless.tty7.de/documents/1602/", ... }
+        #    or the payload itself might be a URL string
         
-        doc_id = payload.get("document_id")
+        doc_id = None
+        
+        # First, try to get document_id directly (for backward compatibility)
+        if isinstance(payload, dict):
+            doc_id = payload.get("document_id")
+        
+        # If not found, try to extract from URL
+        if not doc_id:
+            url = None
+            if isinstance(payload, str):
+                # Payload is a URL string directly
+                url = payload
+            elif isinstance(payload, dict):
+                # Try common URL field names
+                url = payload.get("url") or payload.get("document_url") or payload.get("link")
+            
+            if url:
+                # Extract document ID from URL pattern: https://paperless.tty7.de/documents/1602/
+                match = re.search(r'/documents/(\d+)/?', url)
+                if match:
+                    doc_id = int(match.group(1))
+                    logger.info(f"Extracted document_id {doc_id} from URL: {url}")
+                else:
+                    logger.warning(f"Could not extract document_id from URL: {url}")
+        
         if doc_id:
             # Archive the webhook trigger
             archive_webhook_trigger(doc_id)
@@ -734,7 +761,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             return {"status": "processing_started", "document_id": doc_id, "job_id": job_id}
         else:
             # It might be a different event type or payload
-            logger.warning("Webhook payload missing document_id")
+            logger.warning(f"Webhook payload missing document_id or valid URL. Payload: {payload}")
             return {"status": "ignored", "reason": "missing_document_id"}
             
     except Exception as e:

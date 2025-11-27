@@ -227,7 +227,7 @@
                 ],
                 "body": {
                     "mode": "raw",
-                    "raw": "{\n    \"document_id\": 123,\n    \"task_id\": \"uuid-string\"\n}"
+                    "raw": "{\n    \"url\": \"https://paperless.tty7.de/documents/123/\"\n}"
                 },
                 "url": {
                     "raw": "{{base_url}}/api/webhook",
