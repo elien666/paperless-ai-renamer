@@ -1,6 +1,12 @@
+[![Build and Push Docker Image](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml)
+
+[![Pytest](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml)
+
 # Paperless AI Renamer
 
 A local, Dockerized AI-powered service that integrates with Paperless-ngx to automatically rename documents using a local LLM and RAG (Retrieval Augmented Generation).
+
+![Web UI Screenshot](ui-screenshot.png)
 
 ## Features
 
