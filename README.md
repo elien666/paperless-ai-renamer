@@ -78,7 +78,28 @@ Identify documents that are isolated in the vector space (likely have poor title
 curl -X GET "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
 ```
 
-This returns a JSON list of document IDs sorted by outlier score (highest = most isolated).
+**Parameters**:
+- `k_neighbors` (default: 5): Number of nearest neighbors to check for each document. Higher values provide more context but take longer.
+- `limit` (default: 50): Maximum number of outliers to return.
+
+**How it works**: For each document, the service finds its K nearest neighbors in the vector space and calculates the average distance. Documents with high average distances are isolated and likely have poor titles that don't match their content.
+
+**Response**: Returns a JSON list of documents sorted by outlier score (highest = most isolated):
+```json
+{
+  "status": "success",
+  "count": 50,
+  "outliers": [
+    {
+      "document_id": "839",
+      "title": "Haus Links",
+      "outlier_score": 1.3547,
+      "avg_distance_to_neighbors": 1.3547
+    },
+    ...
+  ]
+}
+```
 
 ### Process Specific Documents
 Process a list of document IDs for renaming:
@@ -89,10 +110,33 @@ curl -X POST "http://localhost:8000/process-documents" \
 ```
 
 ### Webhook Integration
+
 Configure Paperless-ngx to send webhooks:
 1. Go to Paperless Settings → Webhooks
 2. Add webhook URL: `http://paperless-ai-renamer:8000/webhook`
 3. Set trigger to `DOCUMENT_ADDED` or `DOCUMENT_CREATED`
+
+#### Webhook Flow Explained
+
+When a document is uploaded to Paperless, the following happens automatically:
+
+1. **Document Upload**: You upload a file (e.g., "Scan.pdf" or "IMG_1234.jpg") to Paperless
+2. **Paperless Processing**: Paperless processes the document (OCR, text extraction, etc.)
+3. **Webhook Notification**: Paperless sends a webhook POST request to your service with `{"document_id": 839, ...}`
+4. **Immediate Response**: Your service responds immediately with `{"status": "processing_started", "document_id": 839}` (non-blocking)
+5. **Background Processing**: The service processes the document in the background:
+   - Fetches document details from Paperless API
+   - Detects document type (image vs. text) via MIME type
+   - **For Images**: Downloads image → Vision model analyzes → Generates title in configured language
+   - **For Text**: Finds similar documents (RAG) → Text LLM generates title in configured language
+6. **Title Update**: If a better title is generated, the document is updated in Paperless
+7. **Indexing**: The new title is added to the vector database for future learning
+
+**Key Points**:
+- Processing happens asynchronously (doesn't block Paperless)
+- Images automatically use the vision model
+- Text documents use RAG with the text LLM
+- All titles are generated in your configured language (default: German)
 
 ### Health Check
 ```bash
@@ -148,31 +192,93 @@ Or in French:
 
 ## API Documentation
 
-- **OpenAPI Spec**: See `openapi.json`
-- **Postman Collection**: Import `postman_collection.json` into Postman
+For complete API documentation, see:
+- **OpenAPI Specification**: [`openapi.json`](openapi.json) - Full API schema in OpenAPI 3.1.0 format
+- **Postman Collection**: [`postman_collection.json`](postman_collection.json) - Import into Postman for testing
 
-### Endpoints
+### API Overview
 
-- `GET /health` - Health check
-- `POST /scan?newer_than=YYYY-MM-DD` - Trigger manual scan
-- `POST /index?older_than=YYYY-MM-DD` - Trigger bulk indexing
-- `GET /find-outliers?k_neighbors=5&limit=50` - Find outlier documents
-- `POST /process-documents` - Process specific document IDs
-- `POST /webhook` - Webhook endpoint for Paperless
+| Method | Endpoint | Description | Parameters |
+|--------|----------|-------------|------------|
+| `GET` | `/health` | Health check endpoint | None |
+| `POST` | `/scan` | Trigger manual scan for documents with bad titles | `newer_than` (optional): Filter by date (YYYY-MM-DD) |
+| `POST` | `/index` | Bulk index existing documents with good titles | `older_than` (optional): Filter by date (YYYY-MM-DD) |
+| `GET` | `/find-outliers` | Find documents isolated in vector space (poor titles) | `k_neighbors` (default: 5): Number of neighbors to check<br>`limit` (default: 50): Max results to return |
+| `POST` | `/process-documents` | Process specific document IDs for renaming | Body: `{"document_ids": [123, 456, ...]}` |
+| `GET` | `/progress` | Get progress of scan jobs | `job_id` (optional): Specific job ID, or omit for all jobs |
+| `POST` | `/webhook` | Webhook endpoint for Paperless-ngx | Body: `{"document_id": 123, ...}` |
+
+### Endpoint Details
+
+#### `GET /health`
+Simple health check to verify the service is running.
+```bash
+curl http://localhost:8000/health
+```
+
+#### `POST /scan`
+Manually trigger a search for documents matching `BAD_TITLE_REGEX`. Returns a `job_id` for tracking progress.
+```bash
+curl -X POST "http://localhost:8000/scan?newer_than=2024-01-01"
+# Response: {"status": "scan_started", "job_id": "uuid", "newer_than": "2024-01-01"}
+```
+
+#### `POST /index`
+Index existing documents with good titles into the vector database. Use this to build your baseline before scanning.
+```bash
+curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
+```
+
+#### `GET /find-outliers`
+Find documents that are outliers in the vector space (likely have poor titles). See [Find Outliers](#find-outliers) section for detailed explanation.
+```bash
+curl "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
+```
+
+#### `POST /process-documents`
+Process a specific list of document IDs. Useful for targeting specific documents.
+```bash
+curl -X POST "http://localhost:8000/process-documents" \
+  -H "Content-Type: application/json" \
+  -d '{"document_ids": [123, 456, 789]}'
+```
+
+#### `GET /progress`
+Get progress information for scan jobs. Without `job_id`, returns all jobs.
+```bash
+# Get all jobs
+curl "http://localhost:8000/progress"
+
+# Get specific job
+curl "http://localhost:8000/progress?job_id=your-job-id"
+```
+
+#### `POST /webhook`
+Webhook endpoint for Paperless-ngx. Automatically processes documents when they're added. See [Webhook Integration](#webhook-integration) for setup.
 
 ## How It Works
 
-1. **Indexing Phase**: The service indexes your existing documents with good titles into a vector database (ChromaDB)
-2. **Detection**: When a new document arrives (via webhook or scan), it checks if the title matches your `BAD_TITLE_REGEX`
-3. **MIME Type Detection**: The service automatically detects the document type:
-   - Checks the Paperless API response for MIME type fields
+1. **Indexing Phase**: The service indexes your existing documents with good titles into a vector database (ChromaDB). This builds a knowledge base for RAG (Retrieval Augmented Generation).
+
+2. **Document Detection**:
+   - **Via Webhook**: All documents are processed automatically when added to Paperless (no regex filtering)
+   - **Via Manual Scan**: Only documents matching `BAD_TITLE_REGEX` are processed
+
+3. **MIME Type Detection**: The service automatically detects the document type using multiple fallback strategies:
+   - Checks the Paperless API response for MIME type fields (`original_mime_type`, `mime_type`, `media_type`)
    - Falls back to HTTP headers from the download endpoint
    - Infers from file extension if needed
+
 4. **Document Processing**:
-   - **Image Documents**: Uses the vision model (`VISION_MODEL`) to analyze the image and generate a title
-   - **Text Documents**: Uses RAG retrieval to find similar documents, then the text LLM (`LLM_MODEL`) to generate a title
-5. **Language**: All generated titles are created in the language specified by `LANGUAGE` (default: German)
-6. **Update**: The new title is applied to Paperless (unless in dry run mode)
+   - **Image Documents**: Downloads the original image → Vision model (`VISION_MODEL`) analyzes the image → Generates title in configured language
+   - **Text Documents**: Finds similar documents using RAG → Text LLM (`LLM_MODEL`) generates title based on content and examples → Generates title in configured language
+
+5. **Title Evaluation**: The AI compares the generated title with the original:
+   - If different and better → Updates Paperless (unless `DRY_RUN=True`)
+   - If same → Logs that title is already good
+   - If generation failed → Logs error, no update
+
+6. **Learning**: The new title is added to the vector database for future RAG retrieval, improving title generation over time.
 
 ## Architecture
 
