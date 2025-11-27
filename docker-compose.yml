@@ -3,7 +3,7 @@ services:
     # For local testing: build from local Dockerfile
     build: .
     # For production: use pre-built image from GitHub Container Registry
-    # image: ghcr.io/elien666/paperless-agent-rename:latest
+    # image: ghcr.io/elien666/paperless-ai-renamer:latest
     # Replace elien666 with your GitHub username or organization
     container_name: paperless-ai-renamer
     environment:

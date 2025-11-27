@@ -1,0 +1,70 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+htmlcov
+.coverage
+.venv
+venv/
+env/
+
+# Node
+node_modules
+frontend/node_modules
+# frontend/dist is built in the container, but exclude if it exists locally
+frontend/dist
+
+# Data and databases (should be volume mounts, not in image)
+data/
+app/data/
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation
+*.md
+README.md
+frontend/README.md
+
+# Tests
+tests/
+test_*.py
+*_test.py
+pytest.ini
+requirements-test.txt
+
+# CI/CD
+.github/workflows
+
+# Other
+.DS_Store
+*.log
+openapi.json
+postman_collection.json
+

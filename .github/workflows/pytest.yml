@@ -13,14 +13,18 @@ name: Pytest
 on:
   push:
     branches-ignore:
-      - main  # Skip pushes to default branch, only run on non-default branches
+      - main
+      - master
   pull_request:
     branches:
-      - main  # Run on PRs targeting the default branch
+      - main
+      - master
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Skip if push event is to main/master branch
+    if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
     
     steps:
     - name: Checkout code
