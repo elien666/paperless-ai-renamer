@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv*/
 env/
 venv/
 ENV/
@@ -48,6 +49,3 @@ Thumbs.db
 # Environment
 .env
 .env.local
-
-# Docker Compose (contains sensitive configuration)
-docker-compose.yml

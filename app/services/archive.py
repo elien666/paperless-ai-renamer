@@ -13,18 +13,32 @@ db_lock = Lock()
 def get_db_path() -> str:
     """Get the path to the archive database."""
     # Try to get from environment or use default
-    chroma_path = os.getenv("CHROMA_DB_PATH", "/app/data/chroma")
+    chroma_path = os.getenv("CHROMA_DB_PATH")
     
-    # If chroma_path is /app/data/chroma, use /app/data for archive
-    # Otherwise, use the same directory as chroma
-    if chroma_path.endswith("/chroma") or chroma_path.endswith("chroma"):
-        base_dir = os.path.dirname(chroma_path) if os.path.dirname(chroma_path) else "/app/data"
+    # If not set, use relative path from project root
+    if not chroma_path:
+        # Get project root (parent of app directory)
+        # __file__ is app/services/archive.py, so:
+        # os.path.dirname(__file__) = app/services
+        # os.path.dirname(os.path.dirname(__file__)) = app
+        # os.path.dirname(os.path.dirname(os.path.dirname(__file__))) = project root
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        base_dir = os.path.join(project_root, "data")
     else:
-        base_dir = chroma_path
+        # If chroma_path is set, use the same directory as chroma
+        if chroma_path.endswith("/chroma") or chroma_path.endswith("chroma"):
+            base_dir = os.path.dirname(chroma_path)
+            if not base_dir or base_dir == "/":
+                # Fallback to project root data directory
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                base_dir = os.path.join(project_root, "data")
+        else:
+            base_dir = chroma_path
     
-    # Fallback to /app/data if base_dir is empty or root
-    if not base_dir or base_dir == "/" or base_dir == chroma_path:
-        base_dir = "/app/data"
+    # Fallback to relative path if base_dir is empty or root
+    if not base_dir or base_dir == "/":
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        base_dir = os.path.join(project_root, "data")
     
     db_path = os.path.join(base_dir, "archive.db")
     # Ensure directory exists

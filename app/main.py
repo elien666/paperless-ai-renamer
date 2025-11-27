@@ -1,4 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 from threading import Lock, Event as ThreadEvent
 import uuid
 import mimetypes
@@ -137,14 +140,28 @@ def process_document(doc_id: int):
 
 def _signal_progress_update(job_id: str):
     """Signal that progress has been updated for a job (thread-safe)."""
+    global _main_event_loop
+    
     if job_id in progress_events:
         thread_event, async_event = progress_events[job_id]
         # Set the thread event (thread-safe)
         thread_event.set()
         # Signal the async event from the main event loop
-        global _main_event_loop
         if _main_event_loop is not None and _main_event_loop.is_running():
             _main_event_loop.call_soon_threadsafe(async_event.set)
+    
+    # Also signal the global "all jobs" event for long polling without job_id
+    # This allows clients waiting for any job update to be notified
+    global_event_key = "__all_jobs__"
+    if global_event_key in progress_events:
+        thread_event, async_event = progress_events[global_event_key]
+        thread_event.set()
+        if _main_event_loop is not None and _main_event_loop.is_running():
+            _main_event_loop.call_soon_threadsafe(async_event.set)
+
+def _signal_all_jobs_update():
+    """Signal that any job has been created or updated (for long polling without job_id)."""
+    _signal_progress_update("__all_jobs__")
 
 def scheduled_search_job(newer_than: str = None, job_id: str = None):
     """Periodic job to find and process documents with bad titles."""
@@ -245,7 +262,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.post("/scan")
+# Mount API routes under /api prefix
+from fastapi.routing import APIRouter
+api_router = APIRouter()
+
+@api_router.post("/scan")
 async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None):
     """
     Manually trigger a scan for documents with bad titles.
@@ -269,9 +290,12 @@ async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None
         progress_events[job_id] = (thread_event, async_event)
     
     background_tasks.add_task(scheduled_search_job, newer_than, job_id)
+    
+    # Signal global event for long polling without job_id (after job is created)
+    _signal_all_jobs_update()
     return {"status": "scan_started", "job_id": job_id, "newer_than": newer_than}
 
-@app.post("/index")
+@api_router.post("/index")
 async def trigger_index(background_tasks: BackgroundTasks, older_than: str = None):
     """
     Manually trigger bulk indexing of existing documents.
@@ -304,9 +328,12 @@ async def trigger_index(background_tasks: BackgroundTasks, older_than: str = Non
         progress_events[job_id] = (thread_event, async_event)
     
     background_tasks.add_task(run_bulk_index, older_than, job_id)
+    
+    # Signal global event for long polling without job_id (after job is created)
+    _signal_all_jobs_update()
     return {"status": "indexing_started", "job_id": job_id, "older_than": older_than}
 
-@app.get("/find-outliers")
+@api_router.get("/find-outliers")
 async def find_outliers(k_neighbors: int = 5, limit: int = 50):
     """
     Find documents that are outliers in the vector space.
@@ -327,7 +354,7 @@ async def find_outliers(k_neighbors: int = 5, limit: int = 50):
         logger.error(f"Error finding outliers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/process-documents")
+@api_router.post("/process-documents")
 async def process_documents(background_tasks: BackgroundTasks, request: Request):
     """
     Process a list of document IDs for renaming.
@@ -474,7 +501,7 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     jobs[job_id]["completed_at"] = datetime.now().isoformat()
                     _signal_progress_update(job_id)
 
-@app.post("/webhook")
+@api_router.post("/webhook")
 async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     """Handle incoming webhooks from Paperless."""
     try:
@@ -500,11 +527,11 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.error(f"Error processing webhook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/health")
+@api_router.get("/health")
 def health_check():
     return {"status": "ok"}
 
-@app.get("/progress")
+@api_router.get("/progress")
 async def get_progress(
     job_id: Optional[str] = None,
     wait: bool = False,
@@ -533,50 +560,79 @@ async def get_progress(
                 return {"jobs": jobs}
     else:
         # Long-polling mode - wait for updates
-        if not job_id:
-            raise HTTPException(
-                status_code=400,
-                detail="job_id is required when wait=true"
-            )
-        
-        # Get initial state
-        with progress_lock:
-            job = jobs.get(job_id)
-            if not job:
-                raise HTTPException(status_code=404, detail="Job not found")
+        if job_id:
+            # Long poll specific job
+            # Get initial state
+            with progress_lock:
+                job = jobs.get(job_id)
+                if not job:
+                    raise HTTPException(status_code=404, detail="Job not found")
+                
+                # If job is already completed or failed, return immediately
+                if job.get("status") in ("completed", "failed"):
+                    return job
+                
+                # Get the event for this job, create if it doesn't exist
+                if job_id not in progress_events:
+                    thread_event = ThreadEvent()
+                    async_event = asyncio.Event()
+                    progress_events[job_id] = (thread_event, async_event)
+                
+                thread_event, async_event = progress_events[job_id]
+                initial_processed = job.get("processed", 0)
             
-            # If job is already completed or failed, return immediately
-            if job.get("status") in ("completed", "failed"):
+            # Wait for progress update or timeout
+            try:
+                await asyncio.wait_for(async_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Timeout reached, return current state
+                pass
+            
+            # Clear the events for next wait cycle
+            async_event.clear()
+            thread_event.clear()
+            
+            # Return current state
+            with progress_lock:
+                job = jobs.get(job_id)
+                if not job:
+                    raise HTTPException(status_code=404, detail="Job not found")
                 return job
+        else:
+            # Long poll all jobs - wait for any job to start or update
+            # Create a global event that gets signaled when any job updates
+            global_event_key = "__all_jobs__"
             
-            # Get the event for this job, create if it doesn't exist
-            if job_id not in progress_events:
-                thread_event = ThreadEvent()
-                async_event = asyncio.Event()
-                progress_events[job_id] = (thread_event, async_event)
+            with progress_lock:
+                # Check if there are any running jobs
+                has_running = any(j.get("status") == "running" for j in jobs.values())
+                
+                # If no running jobs, wait for a new job to start
+                # We'll create a global event that gets signaled when any job is created/updated
+                if global_event_key not in progress_events:
+                    thread_event = ThreadEvent()
+                    async_event = asyncio.Event()
+                    progress_events[global_event_key] = (thread_event, async_event)
+                
+                thread_event, async_event = progress_events[global_event_key]
+                initial_jobs_count = len(jobs)
             
-            thread_event, async_event = progress_events[job_id]
-            initial_processed = job.get("processed", 0)
-        
-        # Wait for progress update or timeout
-        try:
-            await asyncio.wait_for(async_event.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            # Timeout reached, return current state
-            pass
-        
-        # Clear the events for next wait cycle
-        async_event.clear()
-        thread_event.clear()
-        
-        # Return current state
-        with progress_lock:
-            job = jobs.get(job_id)
-            if not job:
-                raise HTTPException(status_code=404, detail="Job not found")
-            return job
+            # Wait for any job update or timeout
+            try:
+                await asyncio.wait_for(async_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # Timeout reached, return current state
+                pass
+            
+            # Clear the event for next wait cycle
+            async_event.clear()
+            thread_event.clear()
+            
+            # Return all jobs
+            with progress_lock:
+                return {"jobs": jobs}
 
-@app.get("/archive")
+@api_router.get("/archive")
 async def get_archive(
     type: str,
     page: int = 1,
@@ -608,3 +664,41 @@ async def get_archive(
     except Exception as e:
         logger.error(f"Error querying archive: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Mount API router with /api prefix
+app.include_router(api_router, prefix="/api")
+
+# Serve static files from frontend build
+# Note: This must be registered AFTER all API routes
+frontend_dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+if os.path.exists(frontend_dist_path):
+    # Mount static assets (JS, CSS, etc.)
+    assets_path = os.path.join(frontend_dist_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+    
+    # Serve other static files (favicon, etc.)
+    static_path = os.path.join(frontend_dist_path)
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
+    
+    # Serve index.html for SPA routing (catch-all, must be last)
+    # FastAPI will match API routes first, so this only catches unmatched routes
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # Skip known API/documentation paths
+        if full_path in ["docs", "redoc", "openapi.json"]:
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Check if it's a static file request
+        if "." in full_path.split("/")[-1] and not full_path.startswith("assets/"):
+            file_path = os.path.join(frontend_dist_path, full_path)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                return FileResponse(file_path)
+        
+        # Serve index.html for SPA routing
+        index_path = os.path.join(frontend_dist_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Frontend not found")
+else:
+    logger.warning(f"Frontend build not found at {frontend_dist_path}. Static file serving disabled.")

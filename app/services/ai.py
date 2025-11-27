@@ -1,5 +1,4 @@
 import chromadb
-from chromadb.config import Settings as ChromaSettings
 from sentence_transformers import SentenceTransformer
 import requests
 import logging

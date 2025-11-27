@@ -1,9 +1,10 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
 
 class Settings(BaseSettings):
     PAPERLESS_API_URL: str = "http://paperless-webserver:8000"
-    PAPERLESS_API_TOKEN: str
+    PAPERLESS_API_TOKEN: str = ""  # Optional for local dev, but required for actual functionality
     OLLAMA_BASE_URL: str = "http://ollama:11434"
     CRON_SCHEDULE: str = "*/30 * * * *"
     
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
     
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    CHROMA_DB_PATH: str = "/app/data/chroma"
+    CHROMA_DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
     
     # LLM settings
     LLM_MODEL: str = "llama3"
@@ -46,4 +47,12 @@ Generate ONE title in {language} (one line only):"""
 
 @lru_cache()
 def get_settings():
-    return Settings()
+    settings = Settings()
+    if not settings.PAPERLESS_API_TOKEN:
+        import warnings
+        warnings.warn(
+            "PAPERLESS_API_TOKEN is not set. The application will not be able to connect to Paperless. "
+            "Set it in your environment or create a .env file with PAPERLESS_API_TOKEN=your_token",
+            UserWarning
+        )
+    return settings

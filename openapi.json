@@ -1,376 +1,427 @@
 {
-    "openapi": "3.1.0",
-    "info": {
-        "title": "Paperless AI Renamer",
-        "description": "API for Paperless AI Renamer Service",
-        "version": "1.0.0"
-    },
-    "paths": {
-        "/health": {
-            "get": {
-                "summary": "Health Check",
-                "operationId": "health_check_health_get",
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    }
-                }
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Paperless AI Renamer",
+    "description": "API for Paperless AI Renamer Service",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/scan": {
+      "post": {
+        "summary": "Trigger Scan",
+        "description": "Manually trigger a scan for documents with bad titles.\nOptionally filter by date (YYYY-MM-DD) using 'newer_than'.\nReturns a job_id to track progress.",
+        "operationId": "trigger_scan_api_scan_post",
+        "parameters": [
+          {
+            "name": "newer_than",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Newer Than"
             }
-        },
-        "/scan": {
-            "post": {
-                "summary": "Trigger Scan",
-                "description": "Manually trigger a scan for documents with bad titles.\nOptionally filter by date (YYYY-MM-DD) using 'newer_than'.",
-                "operationId": "trigger_scan_scan_post",
-                "parameters": [
-                    {
-                        "name": "newer_than",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "string",
-                            "title": "Newer Than"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
             }
-        },
-        "/index": {
-            "post": {
-                "summary": "Trigger Index",
-                "description": "Manually trigger bulk indexing of existing documents.\nOptionally filter by date (YYYY-MM-DD) using 'older_than'.\nReturns a job_id (always 'index') for tracking progress.\nOnly one index job can run at a time - returns 409 Conflict if already running.",
-                "operationId": "trigger_index_index_post",
-                "parameters": [
-                    {
-                        "name": "older_than",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "string",
-                            "title": "Older Than"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Indexing started successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "status": {
-                                            "type": "string",
-                                            "example": "indexing_started"
-                                        },
-                                        "job_id": {
-                                            "type": "string",
-                                            "example": "index"
-                                        },
-                                        "older_than": {
-                                            "type": "string",
-                                            "nullable": true
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Index job is already running",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "detail": {
-                                            "type": "string",
-                                            "example": "Index job is already running. Please wait for it to complete or check /progress endpoint."
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
             }
-        },
-        "/find-outliers": {
-            "get": {
-                "summary": "Find Outlier Documents",
-                "description": "Identify documents that are isolated in the vector space. Returns a list of document IDs with outlier scores.",
-                "operationId": "find_outliers_find_outliers_get",
-                "parameters": [
-                    {
-                        "name": "k_neighbors",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "integer",
-                            "default": 5,
-                            "title": "K Neighbors"
-                        }
-                    },
-                    {
-                        "name": "limit",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "integer",
-                            "default": 50,
-                            "title": "Limit"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful response with outlier list",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Server Error"
-                    }
-                }
-            }
-        },
-        "/process-documents": {
-            "post": {
-                "summary": "Process Specific Documents",
-                "description": "Accept a list of document IDs and queue them for renaming.",
-                "operationId": "process_documents_process_documents_post",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "document_ids": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "integer"
-                                        }
-                                    }
-                                },
-                                "required": [
-                                    "document_ids"
-                                ]
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Processing started",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request"
-                    },
-                    "500": {
-                        "description": "Server error"
-                    }
-                }
-            }
-        },
-        "/progress": {
-            "get": {
-                "summary": "Get Processing Progress",
-                "description": "Get progress information for scan and index jobs.\nIf job_id is provided, returns details for that specific job (use 'index' for index job).\nIf no job_id is provided, returns all jobs including the index job (if exists).",
-                "operationId": "get_progress_progress_get",
-                "parameters": [
-                    {
-                        "name": "job_id",
-                        "in": "query",
-                        "required": false,
-                        "schema": {
-                            "type": "string",
-                            "title": "Job Id",
-                            "description": "Specific job ID to query (use 'index' for index job), or omit for all jobs"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Progress info",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "jobs": {
-                                            "type": "object",
-                                            "description": "All jobs (when job_id not provided)"
-                                        },
-                                        "status": {
-                                            "type": "string",
-                                            "enum": ["running", "completed", "failed"],
-                                            "description": "Job status (when job_id provided)"
-                                        },
-                                        "total": {
-                                            "type": "integer",
-                                            "description": "Total documents to process"
-                                        },
-                                        "processed": {
-                                            "type": "integer",
-                                            "description": "Documents processed so far"
-                                        },
-                                        "indexed": {
-                                            "type": "integer",
-                                            "description": "Number of documents indexed (index job only, when completed)"
-                                        },
-                                        "skipped_scan": {
-                                            "type": "integer",
-                                            "description": "Number of documents skipped (index job only, when completed)"
-                                        },
-                                        "cleaned": {
-                                            "type": "integer",
-                                            "description": "Number of titles cleaned (index job only, when completed)"
-                                        },
-                                        "created_at": {
-                                            "type": "string",
-                                            "format": "date-time",
-                                            "description": "When the job started"
-                                        },
-                                        "completed_at": {
-                                            "type": "string",
-                                            "format": "date-time",
-                                            "description": "When the job finished (if completed or failed)"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Job not found"
-                    }
-                }
-            }
-        },
-        "/webhook": {
-            "post": {
-                "summary": "Handle Webhook",
-                "description": "Handle incoming webhooks from Paperless.",
-                "operationId": "handle_webhook_webhook_post",
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+          }
         }
+      }
     },
-    "components": {
-        "schemas": {
-            "HTTPValidationError": {
-                "properties": {
-                    "detail": {
-                        "items": {
-                            "$ref": "#/components/schemas/ValidationError"
-                        },
-                        "type": "array",
-                        "title": "Detail"
-                    }
-                },
-                "type": "object",
-                "title": "HTTPValidationError"
-            },
-            "ValidationError": {
-                "properties": {
-                    "loc": {
-                        "items": {
-                            "anyOf": [
-                                {
-                                    "type": "string"
-                                },
-                                {
-                                    "type": "integer"
-                                }
-                            ]
-                        },
-                        "type": "array",
-                        "title": "Location"
-                    },
-                    "msg": {
-                        "type": "string",
-                        "title": "Message"
-                    },
-                    "type": {
-                        "type": "string",
-                        "title": "Error Type"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "loc",
-                    "msg",
-                    "type"
-                ],
-                "title": "ValidationError"
+    "/api/index": {
+      "post": {
+        "summary": "Trigger Index",
+        "description": "Manually trigger bulk indexing of existing documents.\nOptionally filter by date (YYYY-MM-DD) using 'older_than'.\nReturns a job_id to track progress. Only one index job can run at a time.",
+        "operationId": "trigger_index_api_index_post",
+        "parameters": [
+          {
+            "name": "older_than",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Older Than"
             }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
         }
+      }
+    },
+    "/api/find-outliers": {
+      "get": {
+        "summary": "Find Outliers",
+        "description": "Find documents that are outliers in the vector space.\nReturns documents sorted by their isolation score (distance to nearest neighbors).\n\nArgs:\n    k_neighbors: Number of neighbors to consider for outlier detection (default: 5)\n    limit: Maximum number of outliers to return (default: 50)",
+        "operationId": "find_outliers_api_find_outliers_get",
+        "parameters": [
+          {
+            "name": "k_neighbors",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 5,
+              "title": "K Neighbors"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/process-documents": {
+      "post": {
+        "summary": "Process Documents",
+        "description": "Process a list of document IDs for renaming.\nAccepts JSON body: {\"document_ids\": [123, 456, 789]}",
+        "operationId": "process_documents_api_process_documents_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhook": {
+      "post": {
+        "summary": "Handle Webhook",
+        "description": "Handle incoming webhooks from Paperless.",
+        "operationId": "handle_webhook_api_webhook_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/progress": {
+      "get": {
+        "summary": "Get Progress",
+        "description": "Get progress of scan and index jobs.\nIf job_id is provided, returns details for that specific job (use 'index' for index job).\nIf no job_id is provided, returns all jobs including the index job (if exists).\n\nArgs:\n    job_id: Optional job ID to query\n    wait: If True, wait for progress updates (long-polling). Default: False\n    timeout: Maximum time to wait in seconds when wait=True. Default: 60",
+        "operationId": "get_progress_api_progress_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Wait"
+            }
+          },
+          {
+            "name": "timeout",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Timeout"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/archive": {
+      "get": {
+        "summary": "Get Archive",
+        "description": "Query the job archive with pagination.\n\nArgs:\n    type: Archive type - one of 'index', 'scan', 'rename', 'webhook'\n    page: Page number (1-indexed). Default: 1\n    limit: Number of results per page. Default: 50\n    start_date: Optional start date filter (ISO format)\n    end_date: Optional end date filter (ISO format)",
+        "operationId": "get_archive_api_archive_get",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Type"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{full_path}": {
+      "get": {
+        "summary": "Serve Frontend",
+        "operationId": "serve_frontend__full_path__get",
+        "parameters": [
+          {
+            "name": "full_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Full Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
 }

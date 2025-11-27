@@ -9,6 +9,7 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
 - **RAG-Based Learning**: Learns from your existing "good" document titles
 - **Webhook Support**: Processes documents automatically when added to Paperless
 - **Manual Controls**: Trigger scans and indexing on-demand via API
+- **Web UI**: Modern React-based interface for monitoring progress, browsing archive, and processing documents
 - **Dry Run Mode**: Preview changes without modifying documents
 - **Date Filtering**: Process documents by date range
 - **Configurable Prompts**: Customize the AI's instructions
@@ -86,12 +87,16 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
    ```
 
-6. **Test with a Scan**:
+6. **Access the Web UI**:
+   Open your browser and navigate to `http://localhost:8000` to access the web interface.
+
+7. **Test with a Scan**:
    ```bash
    curl -X POST "http://localhost:8000/scan?newer_than=2024-01-01"
    ```
+   Or use the web UI to trigger scans and monitor progress.
 
-7. **Monitor Logs**:
+8. **Monitor Logs**:
    ```bash
    docker-compose logs -f app
    ```
@@ -391,12 +396,17 @@ Webhook endpoint for Paperless-ngx. Automatically processes documents when they'
 │                 │      │   (FastAPI)      │      │   (LLM)     │
 └─────────────────┘      └──────────────────┘      └─────────────┘
                                   │
-                                  ▼
-                         ┌─────────────────┐
-                         │    ChromaDB     │
-                         │ (Vector Store)  │
-                         └─────────────────┘
+                                  │
+                         ┌────────┴────────┐
+                         │                 │
+                         ▼                 ▼
+                  ┌─────────────┐  ┌──────────────┐
+                  │    ChromaDB │  │  React UI   │
+                  │ (Vector DB) │  │  (Frontend)  │
+                  └─────────────┘  └──────────────┘
 ```
+
+The frontend is served as static files by FastAPI in production, or runs as a separate dev server during development.
 
 ## Troubleshooting
 
@@ -425,7 +435,120 @@ If image documents are still not being processed, check:
 - The vision model is pulled: `docker exec -it ollama ollama pull moondream`
 - Check logs for any errors during image processing
 
+## Web UI
+
+The project includes a modern React-based web interface accessible at `http://localhost:8000` (when running in Docker) or `http://localhost:5173` (in development mode).
+
+### Features
+
+- **Progress View**: Real-time monitoring of active scan and index jobs with progress bars and status updates
+- **Archive Browser**: Browse historical data with two tabs:
+  - **Renaming Tab**: View all document title renames with timestamps
+  - **Jobs Tab**: View index and scan job history
+- **Document Processor**: Manually enter a document ID to trigger processing and renaming
+
+### UI Screenshots
+
+The UI uses DaisyUI components with a clean, modern design that matches the Paperless aesthetic.
+
 ## Development
+
+### Local Development Workflow
+
+For local development, you can run the frontend and backend separately for hot-reloading and faster iteration.
+
+#### Prerequisites
+
+- Python 3.11 (recommended to match Docker environment)
+- Node.js 20+ and npm
+- Ollama running (locally or in Docker)
+
+**Note**: Python 3.14+ may have compatibility issues with some dependencies (e.g., `onnxruntime`). It's recommended to use Python 3.11 to match the Docker environment.
+
+#### Setup
+
+1. **Create Python 3.11 Virtual Environment** (recommended):
+   ```bash
+   # Create venv with Python 3.11
+   python3.11 -m venv .venv311
+   
+   # Activate the venv
+   source .venv311/bin/activate  # On macOS/Linux
+   # or
+   .venv311\Scripts\activate  # On Windows
+   ```
+
+2. **Install Backend Dependencies**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+3. **Configure Environment Variables**:
+   Create a `.env` file in the project root with your configuration. Example `.env` file:
+   ```bash
+   # Paperless API Configuration
+   PAPERLESS_API_URL=http://localhost:8000
+   PAPERLESS_API_TOKEN=your_api_token_here
+   
+   # Ollama Configuration
+   OLLAMA_BASE_URL=http://localhost:11434
+   
+   # LLM Configuration
+   LLM_MODEL=llama3
+   VISION_MODEL=moondream
+   LANGUAGE=German
+   
+   # Application Settings
+   ENABLE_SCHEDULER=False
+   BAD_TITLE_REGEX=^(Scan|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}).*
+   DRY_RUN=True
+   
+   # Embedding Model
+   EMBEDDING_MODEL=all-MiniLM-L6-v2
+   
+   # Data Path (for local dev, use relative path)
+   CHROMA_DB_PATH=./data/chroma
+   ```
+   
+   **Note**: The `PAPERLESS_API_TOKEN` is required for the application to function. Without it, the app will start but won't be able to connect to Paperless. See [Getting Your Paperless API Token](#getting-your-paperless-api-token) for instructions.
+
+4. **Install Frontend Dependencies**:
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+4. **Start the Backend** (in one terminal):
+   ```bash
+   # From project root
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+5. **Start the Frontend** (in another terminal):
+   ```bash
+   # From project root
+   cd frontend
+   npm run dev
+   ```
+
+6. **Access the Application**:
+   - Frontend (with hot-reload): `http://localhost:5173`
+   - Backend API: `http://localhost:8000`
+   - Backend API docs: `http://localhost:8000/docs`
+
+The frontend dev server is configured to proxy all API requests to `http://localhost:8000`, so you can use the frontend at port 5173 and it will automatically forward API calls to the backend.
+
+#### Building for Production
+
+To build the frontend for production (used in Docker):
+
+```bash
+cd frontend
+npm run build
+```
+
+This creates a `frontend/dist` directory that will be served by FastAPI in production.
 
 ### Running Tests
 ```bash
@@ -435,16 +558,30 @@ python -m pytest tests/
 ### Project Structure
 ```
 .
-├── app/
+├── app/                      # Backend (FastAPI)
 │   ├── main.py              # FastAPI application
 │   ├── config.py            # Configuration management
 │   └── services/
 │       ├── ai.py            # AI/LLM/Vector Store
-│       └── paperless.py     # Paperless API client
+│       ├── paperless.py     # Paperless API client
+│       └── archive.py       # Archive database
+├── frontend/                 # Frontend (React + Vite)
+│   ├── src/
+│   │   ├── components/      # React components
+│   │   │   ├── ProgressView.tsx
+│   │   │   ├── ArchiveBrowser.tsx
+│   │   │   ├── DocumentProcessor.tsx
+│   │   │   └── Layout.tsx
+│   │   ├── services/
+│   │   │   └── api.ts       # API client
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── package.json
+│   └── vite.config.ts
 ├── tests/
 │   └── test_flow.py         # Unit tests
 ├── docker-compose.yml       # Service orchestration
-├── Dockerfile               # Python service image
+├── Dockerfile               # Multi-stage build (frontend + backend)
 └── requirements.txt         # Python dependencies
 ```
 

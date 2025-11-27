@@ -12,11 +12,12 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                    "raw": "{{base_url}}/health",
+                    "raw": "{{base_url}}/api/health",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "health"
                     ]
                 }
@@ -29,11 +30,12 @@
                 "method": "POST",
                 "header": [],
                 "url": {
-                    "raw": "{{base_url}}/scan?newer_than=2024-01-01",
+                    "raw": "{{base_url}}/api/scan?newer_than=2024-01-01",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "scan"
                     ],
                     "query": [
@@ -53,11 +55,12 @@
                 "method": "POST",
                 "header": [],
                 "url": {
-                    "raw": "{{base_url}}/index?older_than=2024-01-01",
+                    "raw": "{{base_url}}/api/index?older_than=2024-01-01",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "index"
                     ],
                     "query": [
@@ -72,16 +75,101 @@
             "response": []
         },
         {
+            "name": "Get Progress",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/progress?wait=false",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "progress"
+                    ],
+                    "query": [
+                        {
+                            "key": "wait",
+                            "value": "false",
+                            "description": "Set to true for long polling (waits for job updates)"
+                        },
+                        {
+                            "key": "job_id",
+                            "value": "",
+                            "description": "Optional: Specific job ID to track, or omit for all jobs",
+                            "disabled": true
+                        },
+                        {
+                            "key": "timeout",
+                            "value": "30",
+                            "description": "Timeout in seconds for long polling",
+                            "disabled": true
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
+            "name": "Get Archive",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/archive?type=title_renames&page=1&limit=50",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "archive"
+                    ],
+                    "query": [
+                        {
+                            "key": "type",
+                            "value": "title_renames",
+                            "description": "Archive type: 'title_renames', 'scan_jobs', or 'index_jobs'"
+                        },
+                        {
+                            "key": "page",
+                            "value": "1",
+                            "description": "Page number (1-indexed)"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "50",
+                            "description": "Items per page"
+                        },
+                        {
+                            "key": "start_date",
+                            "value": "",
+                            "description": "Optional: Filter from date (YYYY-MM-DD)",
+                            "disabled": true
+                        },
+                        {
+                            "key": "end_date",
+                            "value": "",
+                            "description": "Optional: Filter to date (YYYY-MM-DD)",
+                            "disabled": true
+                        }
+                    ]
+                }
+            },
+            "response": []
+        },
+        {
             "name": "Find Outliers",
             "request": {
                 "method": "GET",
                 "header": [],
                 "url": {
-                    "raw": "{{base_url}}/find-outliers?k_neighbors=5&limit=50",
+                    "raw": "{{base_url}}/api/find-outliers?k_neighbors=5&limit=50",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "find-outliers"
                     ],
                     "query": [
@@ -115,29 +203,13 @@
                     "raw": "{\n    \"document_ids\": [123, 456, 789]\n}"
                 },
                 "url": {
-                    "raw": "{{base_url}}/process-documents",
+                    "raw": "{{base_url}}/api/process-documents",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "process-documents"
-                    ]
-                }
-            },
-            "response": []
-        },
-        {
-            "name": "Get Progress",
-            "request": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                    "raw": "{{base_url}}/progress",
-                    "host": [
-                        "{{base_url}}"
-                    ],
-                    "path": [
-                        "progress"
                     ]
                 }
             },
@@ -158,11 +230,12 @@
                     "raw": "{\n    \"document_id\": 123,\n    \"task_id\": \"uuid-string\"\n}"
                 },
                 "url": {
-                    "raw": "{{base_url}}/webhook",
+                    "raw": "{{base_url}}/api/webhook",
                     "host": [
                         "{{base_url}}"
                     ],
                     "path": [
+                        "api",
                         "webhook"
                     ]
                 }
