@@ -28,7 +28,8 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    ```yaml
    services:
      app:
-       build: .
+       image: ghcr.io/elien666/paperless-agent-rename:latest
+       # For local development, see "Building the Docker Image Locally" section below
        container_name: paperless-ai-renamer
        environment:
          - PAPERLESS_API_URL=http://your-paperless-url:8000
@@ -94,6 +95,37 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    ```bash
    docker-compose logs -f app
    ```
+
+## Building the Docker Image Locally
+
+If you want to build the Docker image locally instead of using the pre-built image from GitHub Container Registry:
+
+1. **Build the image**:
+   ```bash
+   docker build -t paperless-agent-rename .
+   ```
+
+2. **Update `docker-compose.yml`**:
+   Replace the `image:` line with `build: .`:
+   ```yaml
+   services:
+     app:
+       build: .
+       # image: ghcr.io/elien666/paperless-agent-rename:latest  # Comment out or remove this line
+       container_name: paperless-ai-renamer
+       # ... rest of configuration
+   ```
+
+3. **Start the services**:
+   ```bash
+   docker-compose up -d
+   ```
+
+Alternatively, you can tag your local build to match the expected image name:
+```bash
+docker build -t ghcr.io/elien666/paperless-agent-rename:latest .
+```
+Replace `elien666` with your GitHub username or organization.
 
 ## Usage
 
@@ -199,6 +231,22 @@ Configure the service by editing the `environment` section in `docker-compose.ym
 | `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | SentenceTransformer model for embeddings |
 | `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
+
+### Getting Your Paperless API Token
+
+To obtain your Paperless API token:
+
+1. **Log in to Paperless-ngx**: Open your Paperless web interface in a browser
+2. **Navigate to Settings**: Click on your user profile (usually in the top right) → **Settings**
+3. **Go to API Tokens**: In the settings menu, click on **API Tokens** (or **Tokens**)
+4. **Create a New Token**:
+   - Click **Create Token** or **Add Token**
+   - Give it a descriptive name (e.g., "AI Renamer Service")
+   - Click **Create** or **Save**
+5. **Copy the Token**: The token will be displayed once. **Copy it immediately** - you won't be able to see it again after closing the dialog
+6. **Add to docker-compose.yml**: Paste the token as the value for `PAPERLESS_API_TOKEN` in your `docker-compose.yml` file
+
+**Note**: If you lose the token, you'll need to create a new one. Old tokens cannot be retrieved, only regenerated.
 
 ### Example: Custom Regex for Bad Titles
 
