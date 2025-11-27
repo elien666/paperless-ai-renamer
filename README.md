@@ -29,7 +29,7 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    ```yaml
    services:
      app:
-       image: ghcr.io/elien666/paperless-agent-rename:latest
+       image: ghcr.io/elien666/paperless-ai-renamer:latest
        # For local development, see "Building the Docker Image Locally" section below
        container_name: paperless-ai-renamer
        environment:
@@ -116,7 +116,7 @@ If you want to build the Docker image locally instead of using the pre-built ima
    services:
      app:
        build: .
-       # image: ghcr.io/elien666/paperless-agent-rename:latest  # Comment out or remove this line
+       # image: ghcr.io/elien666/paperless-ai-renamer:latest  # Comment out or remove this line
        container_name: paperless-ai-renamer
        # ... rest of configuration
    ```
@@ -128,7 +128,7 @@ If you want to build the Docker image locally instead of using the pre-built ima
 
 Alternatively, you can tag your local build to match the expected image name:
 ```bash
-docker build -t ghcr.io/elien666/paperless-agent-rename:latest .
+docker build -t ghcr.io/elien666/paperless-ai-renamer:latest .
 ```
 Replace `elien666` with your GitHub username or organization.
 
