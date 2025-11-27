@@ -485,8 +485,18 @@ async def process_documents(background_tasks: BackgroundTasks, request: Request)
         # Create a job to track this batch of documents
         job_id = f"process-{uuid.uuid4()}"
         
+        # Fetch document title for the first document (for single-document jobs)
+        document_title = None
+        if len(document_ids) == 1:
+            try:
+                doc = paperless_client.get_document(document_ids[0])
+                if doc:
+                    document_title = doc.get("title", "")
+            except Exception as e:
+                logger.warning(f"Could not fetch document title for {document_ids[0]}: {e}")
+        
         with progress_lock:
-            jobs[job_id] = {
+            job_data: Dict[str, Any] = {
                 "status": "running",
                 "total": len(document_ids),
                 "processed": 0,
@@ -494,6 +504,11 @@ async def process_documents(background_tasks: BackgroundTasks, request: Request)
                 "errors": [],
                 "last_reported": time.time()
             }
+            if document_title:
+                job_data["document_title"] = document_title
+            if len(document_ids) == 1:
+                job_data["document_id"] = document_ids[0]
+            jobs[job_id] = job_data
             # Create events for long-polling
             thread_event = ThreadEvent()
             async_event = asyncio.Event()
@@ -802,6 +817,15 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             # Archive the webhook trigger
             archive_webhook_trigger(doc_id)
             
+            # Fetch document title for display in UI
+            document_title = None
+            try:
+                doc = paperless_client.get_document(doc_id)
+                if doc:
+                    document_title = doc.get("title", "")
+            except Exception as e:
+                logger.warning(f"Could not fetch document title for {doc_id}: {e}")
+            
             # Create a job to track this webhook-triggered document processing
             # Use 'process-' prefix so frontend recognizes it as a Process job
             job_id = f"process-{uuid.uuid4()}"
@@ -813,6 +837,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
                     "processed": 0,
                     "created_at": datetime.now().isoformat(),
                     "document_id": doc_id,
+                    "document_title": document_title,
                     "errors": [],
                     "last_reported": time.time()
                 }

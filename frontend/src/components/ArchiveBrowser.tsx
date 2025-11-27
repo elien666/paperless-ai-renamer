@@ -386,7 +386,7 @@ export default function ArchiveBrowser() {
                           </span>
                         </div>
                         <div className="text-sm">
-                          <span className="text-base-content bg-error/10 px-2 py-1 rounded inline-block" title={item.old_title}>
+                          <span className="text-base-content bg-error/10 px-2 py-1 rounded inline-block line-through" title={item.old_title}>
                             {item.old_title}
                           </span>
                         </div>

@@ -14,10 +14,39 @@ const ProgressContext = createContext<ProgressContextType>({
   subscribe: () => () => {}, // Dummy subscribe function for initial context
 });
 
+// Mock data for development/demo purposes
+const MOCK_PROCESS_JOB: ProgressResponse = {
+  status: 'running',
+  total: 1,
+  processed: 0,
+  created_at: new Date().toISOString(),
+  document_id: 1602,
+  document_title: 'Example Document Title',
+};
+
+// Enable mock process job - set to false to disable
+const ENABLE_MOCK_PROCESS = localStorage.getItem('mockProcess') !== 'false';
+
 export function ProgressProvider({ children }: { children: React.ReactNode }) {
-  const [progress, setProgress] = useState<Record<string, ProgressResponse>>({});
+  const [progress, setProgress] = useState<Record<string, ProgressResponse>>(() => {
+    // Initialize with mock data if enabled
+    if (ENABLE_MOCK_PROCESS) {
+      return {
+        'process-mock-12345': MOCK_PROCESS_JOB,
+      };
+    }
+    return {};
+  });
   const [loading, setLoading] = useState(true);
-  const previousProgressRef = useRef<Record<string, ProgressResponse>>({});
+  const previousProgressRef = useRef<Record<string, ProgressResponse>>(() => {
+    // Initialize previous progress with mock data if enabled
+    if (ENABLE_MOCK_PROCESS) {
+      return {
+        'process-mock-12345': MOCK_PROCESS_JOB,
+      };
+    }
+    return {};
+  });
   const isMountedRef = useRef(true);
   const subscribersRef = useRef<Set<(progress: Record<string, ProgressResponse>, previous: Record<string, ProgressResponse>) => void>>(new Set());
 
@@ -46,7 +75,15 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       
       if (!isMountedRef.current) return;
 
-      const currentProgress = data.jobs || { [data.status || 'unknown']: data };
+      let currentProgress = data.jobs || { [data.status || 'unknown']: data };
+      
+      // Merge mock data if enabled
+      if (ENABLE_MOCK_PROCESS) {
+        currentProgress = {
+          ...currentProgress,
+          'process-mock-12345': MOCK_PROCESS_JOB,
+        };
+      }
       
       // Update state
       setProgress(currentProgress);
@@ -69,7 +106,16 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
         try {
           const data = await apiService.getProgress(undefined, false);
           if (isMountedRef.current) {
-            const currentProgress = data.jobs || { [data.status || 'unknown']: data };
+            let currentProgress = data.jobs || { [data.status || 'unknown']: data };
+            
+            // Merge mock data if enabled
+            if (ENABLE_MOCK_PROCESS) {
+              currentProgress = {
+                ...currentProgress,
+                'process-mock-12345': MOCK_PROCESS_JOB,
+              };
+            }
+            
             setProgress(currentProgress);
             setLoading(false);
             
@@ -104,14 +150,23 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
       try {
         const data = await apiService.getProgress(undefined, false);
         if (isMountedRef.current) {
+          let currentProgress: Record<string, ProgressResponse>;
           if (data.jobs) {
-            setProgress(data.jobs);
-            previousProgressRef.current = data.jobs;
+            currentProgress = data.jobs;
           } else {
-            const progressObj = { [data.status || 'unknown']: data };
-            setProgress(progressObj);
-            previousProgressRef.current = progressObj;
+            currentProgress = { [data.status || 'unknown']: data };
           }
+          
+          // Merge mock data if enabled
+          if (ENABLE_MOCK_PROCESS) {
+            currentProgress = {
+              ...currentProgress,
+              'process-mock-12345': MOCK_PROCESS_JOB,
+            };
+          }
+          
+          setProgress(currentProgress);
+          previousProgressRef.current = currentProgress;
           setLoading(false);
           // Now start long polling for updates
           fetchAllJobsWithLongPolling();

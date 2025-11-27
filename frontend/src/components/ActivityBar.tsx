@@ -122,9 +122,13 @@ export default function ActivityBar() {
             {activeJobs.map(([jobId, job]) => {
               const jobType = getJobType(jobId);
               const hasDocumentErrors = job.errors && job.errors.length > 0;
+              const documentTitle = (job as any).document_title;
               
               return (
-                <div key={jobId} className="flex items-center gap-2 px-2 py-1 bg-base-200 rounded-full border border-base-300" title={hasDocumentErrors ? `${job.errors?.length || 0} document error(s)` : undefined}>
+                <div 
+                  key={jobId} 
+                  className="relative group flex items-center gap-2 px-2 py-1 bg-base-200 rounded-full border border-base-300"
+                >
                   <span className="font-medium text-xs">{jobType}</span>
                   <ImSpinner2 className="w-5 h-5 animate-spin text-primary" />
                   {job.total !== undefined && (
@@ -143,6 +147,16 @@ export default function ActivityBar() {
                     <span className="text-xs text-error" title={job.errors.map((e: any) => `Doc ${e.document_id}: ${e.error}`).join('\n')}>
                       {job.errors.length} error{job.errors.length !== 1 ? 's' : ''}
                     </span>
+                  )}
+                  {documentTitle && (
+                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-3 py-2 bg-base-300 text-base-content text-sm rounded-lg shadow-lg border border-base-content/20 max-w-[min(90vw,20rem)] break-words z-50 whitespace-normal opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                      <div className="relative">
+                        <div className="max-w-full">
+                          {documentTitle}
+                        </div>
+                        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-full w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-base-300"></div>
+                      </div>
+                    </div>
                   )}
                 </div>
               );
