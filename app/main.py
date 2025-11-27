@@ -695,8 +695,15 @@ def process_document_with_progress(doc_id: int, job_id: str):
 async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     """Handle incoming webhooks from Paperless."""
     try:
-        payload = await request.json()
-        logger.info(f"Received webhook: {payload}")
+        # Try to parse as JSON first
+        try:
+            payload = await request.json()
+        except:
+            # If JSON parsing fails, try reading as text (might be a plain URL string)
+            body = await request.body()
+            payload = body.decode("utf-8").strip() if body else None
+        
+        logger.info(f"Received webhook payload (type: {type(payload)}): {payload}")
         
         # Paperless webhook payload structure:
         # Paperless may send either:
@@ -708,7 +715,27 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         
         # First, try to get document_id directly (for backward compatibility)
         if isinstance(payload, dict):
-            doc_id = payload.get("document_id")
+            doc_id_raw = payload.get("document_id")
+            # Ensure it's an integer, not a string
+            if doc_id_raw is not None:
+                # Check if document_id is actually a URL string (Paperless might send it this way)
+                if isinstance(doc_id_raw, str) and ('http' in doc_id_raw or '/documents/' in doc_id_raw):
+                    logger.info(f"document_id field contains URL string, extracting ID: {doc_id_raw}")
+                    match = re.search(r'/documents/(\d+)/?', doc_id_raw)
+                    if match:
+                        doc_id = int(match.group(1))
+                    else:
+                        doc_id = None
+                else:
+                    # Try to convert to integer
+                    try:
+                        doc_id = int(doc_id_raw)
+                    except (ValueError, TypeError):
+                        doc_id = None
+            else:
+                doc_id = None
+        else:
+            doc_id = None
         
         # If not found, try to extract from URL
         if not doc_id:
@@ -717,19 +744,61 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
                 # Payload is a URL string directly
                 url = payload
             elif isinstance(payload, dict):
-                # Try common URL field names
-                url = payload.get("url") or payload.get("document_url") or payload.get("link")
+                # Try common URL field names - check all possible variations
+                url = (payload.get("url") or 
+                       payload.get("document_url") or 
+                       payload.get("link") or
+                       payload.get("document") or
+                       payload.get("target_url") or
+                       payload.get("webhook_url"))
             
             if url:
-                # Extract document ID from URL pattern: https://paperless.tty7.de/documents/1602/
-                match = re.search(r'/documents/(\d+)/?', url)
-                if match:
-                    doc_id = int(match.group(1))
-                    logger.info(f"Extracted document_id {doc_id} from URL: {url}")
-                else:
-                    logger.warning(f"Could not extract document_id from URL: {url}")
+                # Ensure url is a string
+                if not isinstance(url, str):
+                    logger.warning(f"URL field is not a string: {url} (type: {type(url)})")
+                    url = str(url) if url else None
+                
+                if url:
+                    # Extract document ID from URL pattern: https://paperless.tty7.de/documents/1602/
+                    match = re.search(r'/documents/(\d+)/?', url)
+                    if match:
+                        doc_id = int(match.group(1))
+                        logger.info(f"Extracted document_id {doc_id} from URL: {url}")
+                    else:
+                        logger.warning(f"Could not extract document_id from URL: {url}")
+                        doc_id = None
         
-        if doc_id:
+        # Final validation: Ensure doc_id is an integer before proceeding
+        if doc_id is not None:
+            # Double-check it's not accidentally a URL string
+            if isinstance(doc_id, str):
+                # If it's a string that looks like a URL, try to extract ID from it
+                if 'http' in doc_id or '/documents/' in doc_id:
+                    logger.warning(f"doc_id appears to be a URL string, attempting extraction: {doc_id}")
+                    match = re.search(r'/documents/(\d+)/?', doc_id)
+                    if match:
+                        doc_id = int(match.group(1))
+                        logger.info(f"Extracted document_id {doc_id} from string that looked like URL")
+                    else:
+                        logger.error(f"Could not extract document_id from string: {doc_id}")
+                        return {"status": "ignored", "reason": "invalid_document_id_format"}
+                else:
+                    # It's a string but not a URL, try to convert to int
+                    try:
+                        doc_id = int(doc_id)
+                    except (ValueError, TypeError):
+                        logger.error(f"Invalid document_id type: {doc_id} (type: {type(doc_id)})")
+                        return {"status": "ignored", "reason": "invalid_document_id"}
+            else:
+                # Not a string, try to convert to int
+                try:
+                    doc_id = int(doc_id)
+                except (ValueError, TypeError):
+                    logger.error(f"Invalid document_id type: {doc_id} (type: {type(doc_id)})")
+                    return {"status": "ignored", "reason": "invalid_document_id"}
+        
+        # Final check: doc_id must be an integer
+        if doc_id and isinstance(doc_id, int):
             # Archive the webhook trigger
             archive_webhook_trigger(doc_id)
             
