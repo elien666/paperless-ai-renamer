@@ -306,13 +306,13 @@ export default function ArchiveBrowser() {
                       className="flex w-full items-start gap-4 p-4 hover:bg-base-200 cursor-pointer"
                       onClick={() => handleRenameItemClick(item.document_id)}
                     >
-                      {/* First column: Document ID (fixed width) */}
+                      {/* First column: Renaming badge (fixed width) */}
                       <div className="shrink-0 w-24">
                         <span className="badge badge-sm badge-soft badge-success">
-                          #{item.document_id}
+                          Renaming
                         </span>
                       </div>
-                      {/* Second column: Rename info and timestamp */}
+                      {/* Second column: Rename info, document button, and timestamp */}
                       <div className="flex-1 flex flex-col gap-1 min-w-0">
                         <div className="text-base font-semibold">
                           <span className="text-base-content bg-success/10 px-2 py-1 rounded inline-block" title={item.new_title}>
@@ -324,7 +324,23 @@ export default function ArchiveBrowser() {
                             {item.old_title}
                           </span>
                         </div>
-                        <span className="text-xs text-base-content/50">{formatDate(item.timestamp)}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-ghost border border-base-content/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const url = getPaperlessUrl(item.document_id);
+                              window.open(url, '_blank', 'noopener,noreferrer');
+                            }}
+                          >
+                            <FaFileAlt className="w-3 h-3" />
+                            Document #{item.document_id}
+                          </button>
+                          <span className="text-xs text-base-content/50">
+                            {formatDate(item.timestamp)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </li>
