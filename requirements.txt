@@ -7,3 +7,8 @@ apscheduler
 python-dotenv
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
+pytest
+pytest-cov
+pytest-asyncio
+pytest-mock
+httpx
