@@ -63,7 +63,7 @@
         "/index": {
             "post": {
                 "summary": "Trigger Index",
-                "description": "Manually trigger bulk indexing of existing documents.\nOptionally filter by date (YYYY-MM-DD) using 'older_than'.",
+                "description": "Manually trigger bulk indexing of existing documents.\nOptionally filter by date (YYYY-MM-DD) using 'older_than'.\nReturns a job_id (always 'index') for tracking progress.\nOnly one index job can run at a time - returns 409 Conflict if already running.",
                 "operationId": "trigger_index_index_post",
                 "parameters": [
                     {
@@ -78,10 +78,42 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "Successful Response",
+                        "description": "Indexing started successfully",
                         "content": {
                             "application/json": {
-                                "schema": {}
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "indexing_started"
+                                        },
+                                        "job_id": {
+                                            "type": "string",
+                                            "example": "index"
+                                        },
+                                        "older_than": {
+                                            "type": "string",
+                                            "nullable": true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Index job is already running",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "detail": {
+                                            "type": "string",
+                                            "example": "Index job is already running. Please wait for it to complete or check /progress endpoint."
+                                        }
+                                    }
+                                }
                             }
                         }
                     },
@@ -191,8 +223,20 @@
         "/progress": {
             "get": {
                 "summary": "Get Processing Progress",
-                "description": "Returns total number of documents to process and how many have been processed.",
+                "description": "Get progress information for scan and index jobs.\nIf job_id is provided, returns details for that specific job (use 'index' for index job).\nIf no job_id is provided, returns all jobs including the index job (if exists).",
                 "operationId": "get_progress_progress_get",
+                "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "title": "Job Id",
+                            "description": "Specific job ID to query (use 'index' for index job), or omit for all jobs"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Progress info",
@@ -201,16 +245,52 @@
                                 "schema": {
                                     "type": "object",
                                     "properties": {
+                                        "jobs": {
+                                            "type": "object",
+                                            "description": "All jobs (when job_id not provided)"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "enum": ["running", "completed", "failed"],
+                                            "description": "Job status (when job_id provided)"
+                                        },
                                         "total": {
-                                            "type": "integer"
+                                            "type": "integer",
+                                            "description": "Total documents to process"
                                         },
                                         "processed": {
-                                            "type": "integer"
+                                            "type": "integer",
+                                            "description": "Documents processed so far"
+                                        },
+                                        "indexed": {
+                                            "type": "integer",
+                                            "description": "Number of documents indexed (index job only, when completed)"
+                                        },
+                                        "skipped_scan": {
+                                            "type": "integer",
+                                            "description": "Number of documents skipped (index job only, when completed)"
+                                        },
+                                        "cleaned": {
+                                            "type": "integer",
+                                            "description": "Number of titles cleaned (index job only, when completed)"
+                                        },
+                                        "created_at": {
+                                            "type": "string",
+                                            "format": "date-time",
+                                            "description": "When the job started"
+                                        },
+                                        "completed_at": {
+                                            "type": "string",
+                                            "format": "date-time",
+                                            "description": "When the job finished (if completed or failed)"
                                         }
                                     }
                                 }
                             }
                         }
+                    },
+                    "404": {
+                        "description": "Job not found"
                     }
                 }
             }

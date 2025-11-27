@@ -216,9 +216,30 @@ async def trigger_index(background_tasks: BackgroundTasks, older_than: str = Non
     """
     Manually trigger bulk indexing of existing documents.
     Optionally filter by date (YYYY-MM-DD) using 'older_than'.
+    Returns a job_id to track progress. Only one index job can run at a time.
     """
-    background_tasks.add_task(run_bulk_index, older_than)
-    return {"status": "indexing_started", "older_than": older_than}
+    job_id = "index"
+    
+    # Check if index job is already running
+    with progress_lock:
+        existing_job = jobs.get(job_id)
+        if existing_job and existing_job.get("status") == "running":
+            raise HTTPException(
+                status_code=409,
+                detail="Index job is already running. Please wait for it to complete or check /progress endpoint."
+            )
+        
+        # Create or update job entry
+        jobs[job_id] = {
+            "status": "running",
+            "total": 0,
+            "processed": 0,
+            "created_at": datetime.now().isoformat(),
+            "older_than": older_than
+        }
+    
+    background_tasks.add_task(run_bulk_index, older_than, job_id)
+    return {"status": "indexing_started", "job_id": job_id, "older_than": older_than}
 
 @app.get("/find-outliers")
 async def find_outliers(k_neighbors: int = 5, limit: int = 50):
@@ -269,77 +290,110 @@ async def process_documents(background_tasks: BackgroundTasks, request: Request)
 
 import re
 
-def run_bulk_index(older_than: str = None):
+def run_bulk_index(older_than: str = None, job_id: str = None):
     """Fetch all documents and index them if they have good titles."""
-    logger.info(f"Starting bulk index... (older_than={older_than})")
+    logger.info(f"Starting bulk index... (older_than={older_than}, job_id={job_id})")
     
-    # 1. Fetch all documents
-    all_docs = paperless_client.get_all_documents(older_than=older_than)
-    logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
-    
-    # 2. Filter and Index
-    count = 0
-    skipped_scan = 0
-    cleaned = 0
-    
-    # Patterns for different date formats
-    full_date_pattern = re.compile(r'^(\d{4})-(\d{2})-(\d{2})\s*')  # YYYY-MM-DD (with day)
-    year_month_pattern = re.compile(r'^(\d{4})-(\d{2})\s+(.+)$')    # YYYY-MM (without day)
-    year_only_pattern = re.compile(r'^(\d{4})\s+(.+)$')             # YYYY only
-    
-    for doc in all_docs:
-        title = doc.get("title", "")
-        content = doc.get("content", "")
-        doc_id = doc.get("id")
+    try:
+        # 1. Fetch all documents
+        all_docs = paperless_client.get_all_documents(older_than=older_than)
+        logger.info(f"Fetched {len(all_docs)} documents from Paperless.")
         
-        if not content or not title:
-            continue
+        # Initialize progress tracking for this job
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["total"] = len(all_docs)
+                    jobs[job_id]["processed"] = 0
         
-        # Skip documents starting with "Scan"
-        if title.startswith("Scan"):
-            skipped_scan += 1
-            continue
+        # 2. Filter and Index
+        count = 0
+        skipped_scan = 0
+        cleaned = 0
         
-        # Clean up titles with leading dates
-        cleaned_title = title
+        # Patterns for different date formats
+        full_date_pattern = re.compile(r'^(\d{4})-(\d{2})-(\d{2})\s*')  # YYYY-MM-DD (with day)
+        year_month_pattern = re.compile(r'^(\d{4})-(\d{2})\s+(.+)$')    # YYYY-MM (without day)
+        year_only_pattern = re.compile(r'^(\d{4})\s+(.+)$')             # YYYY only
         
-        # Check for full date with day (YYYY-MM-DD) - remove entirely
-        full_date_match = full_date_pattern.match(title)
-        if full_date_match:
-            cleaned_title = title[full_date_match.end():].strip()
-            if cleaned_title:
-                logger.info(f"Removed full date for doc {doc_id}: '{title}' -> '{cleaned_title}'")
-                cleaned += 1
-            else:
-                cleaned_title = title  # Keep original if cleaning results in empty string
-        else:
-            # Check for year-month (YYYY-MM) - flip to MM-YYYY and move to end
-            year_month_match = year_month_pattern.match(title)
-            if year_month_match:
-                year = year_month_match.group(1)
-                month = year_month_match.group(2)
-                rest = year_month_match.group(3)
-                cleaned_title = f"{rest} {month}-{year}"
-                logger.info(f"Moved year-month to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
-                cleaned += 1
-            else:
-                # Check for year-only (YYYY) - move to end
-                year_match = year_only_pattern.match(title)
-                if year_match:
-                    year = year_match.group(1)
-                    rest = year_match.group(2)
-                    cleaned_title = f"{rest} {year}"
-                    logger.info(f"Moved year to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+        for doc in all_docs:
+            title = doc.get("title", "")
+            content = doc.get("content", "")
+            doc_id = doc.get("id")
+            
+            # Update processed count (even if we skip this document)
+            if job_id:
+                with progress_lock:
+                    if job_id in jobs:
+                        jobs[job_id]["processed"] += 1
+            
+            if not content or not title:
+                continue
+            
+            # Skip documents starting with "Scan"
+            if title.startswith("Scan"):
+                skipped_scan += 1
+                continue
+            
+            # Clean up titles with leading dates
+            cleaned_title = title
+            
+            # Check for full date with day (YYYY-MM-DD) - remove entirely
+            full_date_match = full_date_pattern.match(title)
+            if full_date_match:
+                cleaned_title = title[full_date_match.end():].strip()
+                if cleaned_title:
+                    logger.info(f"Removed full date for doc {doc_id}: '{title}' -> '{cleaned_title}'")
                     cleaned += 1
+                else:
+                    cleaned_title = title  # Keep original if cleaning results in empty string
+            else:
+                # Check for year-month (YYYY-MM) - flip to MM-YYYY and move to end
+                year_month_match = year_month_pattern.match(title)
+                if year_month_match:
+                    year = year_month_match.group(1)
+                    month = year_month_match.group(2)
+                    rest = year_month_match.group(3)
+                    cleaned_title = f"{rest} {month}-{year}"
+                    logger.info(f"Moved year-month to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+                    cleaned += 1
+                else:
+                    # Check for year-only (YYYY) - move to end
+                    year_match = year_only_pattern.match(title)
+                    if year_match:
+                        year = year_match.group(1)
+                        rest = year_match.group(2)
+                        cleaned_title = f"{rest} {year}"
+                        logger.info(f"Moved year to end for doc {doc_id}: '{title}' -> '{cleaned_title}'")
+                        cleaned += 1
+            
+            # Index the document with the cleaned title
+            try:
+                ai_service.add_document_to_index(str(doc_id), content, cleaned_title)
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to index document {doc_id}: {e}")
         
-        # Index the document with the cleaned title
-        try:
-            ai_service.add_document_to_index(str(doc_id), content, cleaned_title)
-            count += 1
-        except Exception as e:
-            logger.error(f"Failed to index document {doc_id}: {e}")
-    
-    logger.info(f"Bulk index complete. Indexed {count} documents (skipped {skipped_scan} 'Scan' docs, cleaned {cleaned} date prefixes).")
+        logger.info(f"Bulk index complete. Indexed {count} documents (skipped {skipped_scan} 'Scan' docs, cleaned {cleaned} date prefixes).")
+        
+        # Mark job as completed and store results
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["status"] = "completed"
+                    jobs[job_id]["indexed"] = count
+                    jobs[job_id]["skipped_scan"] = skipped_scan
+                    jobs[job_id]["cleaned"] = cleaned
+                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    
+    except Exception as e:
+        logger.error(f"Error in run_bulk_index: {e}")
+        if job_id:
+            with progress_lock:
+                if job_id in jobs:
+                    jobs[job_id]["status"] = "failed"
+                    jobs[job_id]["error"] = str(e)
+                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
 
 @app.post("/webhook")
 async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -372,9 +426,9 @@ def health_check():
 @app.get("/progress")
 def get_progress(job_id: str = None):
     """
-    Get progress of scan jobs.
-    If job_id is provided, returns details for that specific job.
-    If no job_id is provided, returns a list of all jobs.
+    Get progress of scan and index jobs.
+    If job_id is provided, returns details for that specific job (use 'index' for index job).
+    If no job_id is provided, returns all jobs including the index job (if exists).
     """
     with progress_lock:
         if job_id:
@@ -383,4 +437,5 @@ def get_progress(job_id: str = None):
                 raise HTTPException(status_code=404, detail="Job not found")
             return job
         else:
+            # Return all jobs, including index job if it exists
             return {"jobs": jobs}

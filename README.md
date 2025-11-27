@@ -239,10 +239,10 @@ For complete API documentation, see:
 |--------|----------|-------------|------------|
 | `GET` | `/health` | Health check endpoint | None |
 | `POST` | `/scan` | Trigger manual scan for documents with bad titles | `newer_than` (optional): Filter by date (YYYY-MM-DD) |
-| `POST` | `/index` | Bulk index existing documents with good titles | `older_than` (optional): Filter by date (YYYY-MM-DD) |
+| `POST` | `/index` | Bulk index existing documents with good titles | `older_than` (optional): Filter by date (YYYY-MM-DD). Returns `job_id` for progress tracking. Only one index job can run at a time. |
 | `GET` | `/find-outliers` | Find documents isolated in vector space (poor titles) | `k_neighbors` (default: 5): Number of neighbors to check<br>`limit` (default: 50): Max results to return |
 | `POST` | `/process-documents` | Process specific document IDs for renaming | Body: `{"document_ids": [123, 456, ...]}` |
-| `GET` | `/progress` | Get progress of scan jobs | `job_id` (optional): Specific job ID, or omit for all jobs |
+| `GET` | `/progress` | Get progress of scan and index jobs | `job_id` (optional): Specific job ID (use `index` for index job), or omit for all jobs |
 | `POST` | `/webhook` | Webhook endpoint for Paperless-ngx | Body: `{"document_id": 123, ...}` |
 
 ### Endpoint Details
@@ -261,9 +261,13 @@ curl -X POST "http://localhost:8000/scan?newer_than=2024-01-01"
 ```
 
 #### `POST /index`
-Index existing documents with good titles into the vector database. Use this to build your baseline before scanning.
+Index existing documents with good titles into the vector database. Use this to build your baseline before scanning. Returns a `job_id` (always `"index"`) for tracking progress. Only one index job can run at a time - if you try to start a new one while another is running, you'll get a 409 Conflict error.
 ```bash
 curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
+# Response: {"status": "indexing_started", "job_id": "index", "older_than": "2024-01-01"}
+
+# If already running:
+# Response: 409 Conflict - "Index job is already running. Please wait for it to complete or check /progress endpoint."
 ```
 
 #### `GET /find-outliers`
@@ -281,14 +285,28 @@ curl -X POST "http://localhost:8000/process-documents" \
 ```
 
 #### `GET /progress`
-Get progress information for scan jobs. Without `job_id`, returns all jobs.
+Get progress information for scan and index jobs. Without `job_id`, returns all jobs including the index job (if exists). Use `job_id=index` to query the index job specifically.
 ```bash
-# Get all jobs
+# Get all jobs (includes scan jobs and index job if exists)
 curl "http://localhost:8000/progress"
 
-# Get specific job
-curl "http://localhost:8000/progress?job_id=your-job-id"
+# Get specific scan job
+curl "http://localhost:8000/progress?job_id=your-scan-job-id"
+
+# Get index job status
+curl "http://localhost:8000/progress?job_id=index"
 ```
+
+Progress response for index job includes:
+- `status`: "running", "completed", or "failed"
+- `total`: Total documents fetched
+- `processed`: Documents processed so far
+- `indexed`: Number of documents successfully indexed (when completed)
+- `skipped_scan`: Number of documents skipped (starting with "Scan") (when completed)
+- `cleaned`: Number of titles cleaned (date prefixes moved/removed) (when completed)
+- `created_at`: When the job started
+- `completed_at`: When the job finished (if completed or failed)
+- `older_than`: Date filter used (if any)
 
 #### `POST /webhook`
 Webhook endpoint for Paperless-ngx. Automatically processes documents when they're added. See [Webhook Integration](#webhook-integration) for setup.
