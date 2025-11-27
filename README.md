@@ -4,7 +4,7 @@
 
 A local, Dockerized AI-powered service that automatically integrates with [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) via webhooks to rename documents using a local LLM and RAG (Retrieval Augmented Generation). A modern web UI and REST API are available to manage vector database indexing, manually scan for documents, and trigger title generation.
 
-<video src="docs/ui-screencast.mp4" width="100%" autoplay muted loop playsinline></video>
+https://github.com/user-attachments/assets/491418f7-ca89-488f-b813-86f089f37fc6
 
 ## Features
 
