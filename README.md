@@ -23,12 +23,7 @@ https://github.com/user-attachments/assets/491418f7-ca89-488f-b813-86f089f37fc6
 
 ## Quick Start
 
-1. **Clone and Configure**:
-   ```bash
-   cd paperless-agent-rename
-   ```
-
-2. **Add to `docker-compose.yml`**:
+1. **Add to `docker-compose.yml`**:
    You can add this service to your existing Paperless `docker-compose.yml` file, or create a separate one. Update the environment variables with your actual values (see [Configuration](#configuration) for all available options):
    
    ```yaml
@@ -69,39 +64,39 @@ https://github.com/user-attachments/assets/491418f7-ca89-488f-b813-86f089f37fc6
    
    **Port Configuration**: The example uses port `8337:8000` (host:container). You can customize the host port (first number) if needed, but keep the container port as `8000`. All API examples in this README assume port `8337` on the host.
 
-3. **Start the Services**:
+2. **Start the Services**:
    ```bash
    docker-compose up -d
    ```
 
-4. **Pull the Required Models**:
+3. **Pull the Required Models**:
    ```bash
    docker exec -it ollama ollama pull llama3
    docker exec -it ollama ollama pull moondream  # For image document processing
    docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # For embeddings (vector search)
    ```
 
-5. **Access the Web UI**:
+4. **Access the Web UI**:
    Open your browser and navigate to `http://localhost:8337` to access the web interface.
 
-6. **Build Your Baseline** (Index existing "good" documents):
+5. **Build Your Baseline** (Index existing "good" documents):
    You can do this through the web UI using the (+) Floating Action Button (FAB), or via API:
    ```bash
    curl -X POST "http://localhost:8337/index?older_than=2024-01-01"
    ```
 
-7. **Test with a Scan**:
+6. **Test with a Scan**:
    You can do this through the web UI using the (+) Floating Action Button (FAB), or via API:
    ```bash
    curl -X POST "http://localhost:8337/scan?newer_than=2024-01-01"
    ```
 
-8. **Monitor Logs**:
+7. **Monitor Logs**:
    ```bash
    docker-compose logs -f renamer
    ```
 
-9. **Configure Webhook Integration** (Optional but Recommended):
+8. **Configure Webhook Integration** (Optional but Recommended):
    
    The service automatically integrates with [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) via webhooks, processing documents immediately when they're added. To enable automatic processing:
    
