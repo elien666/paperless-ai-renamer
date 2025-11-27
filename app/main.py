@@ -32,6 +32,7 @@ from app.services.archive import (
     archive_scan_job,
     archive_title_rename,
     archive_webhook_trigger,
+    archive_error,
     query_archive
 )
 
@@ -46,97 +47,149 @@ logger.info(f"Configuration loaded - LLM_MODEL: {settings.LLM_MODEL}, VISION_MOD
 paperless_client = PaperlessClient()
 ai_service = AIService()
 
-def process_document(doc_id: int):
+def process_document(doc_id: int, job_id: str = None):
     """Core logic to process a single document."""
     logger.info(f"Processing document {doc_id}...")
+    error_message = None
     
-    # 1. Fetch Document
-    doc = paperless_client.get_document(doc_id)
-    if not doc:
-        logger.error(f"Could not find document {doc_id}")
-        return
+    try:
+        # 1. Fetch Document
+        doc = paperless_client.get_document(doc_id)
+        if not doc:
+            error_message = f"Could not find document {doc_id}"
+            logger.error(error_message)
+            if job_id:
+                _update_document_job_error(job_id, doc_id, error_message)
+            return
 
-    content = doc.get("content", "")
-    original_title = doc.get("title", "")
-    
-    # Try multiple possible field names for MIME type
-    mime_type = (
-        doc.get("original_mime_type") or 
-        doc.get("mime_type") or 
-        doc.get("media_type") or
-        ""
-    )
-    
-    # If not found in document response, try to get it from download headers
-    if not mime_type:
-        mime_type = paperless_client.get_document_mime_type(doc_id) or ""
-    
-    # If still not found, try to infer from original_filename extension
-    if not mime_type:
-        original_filename = doc.get("original_file_name", "") or doc.get("original_filename", "")
-        if original_filename:
-            guessed_type, _ = mimetypes.guess_type(original_filename)
-            if guessed_type:
-                mime_type = guessed_type
-                logger.info(f"Inferred MIME type from filename for document {doc_id}: {mime_type}")
-    
-    logger.info(f"Document {doc_id}: '{original_title}' (MIME: {mime_type})")
-    
-    # Check if this is an image document
-    if mime_type and mime_type.startswith("image/"):
-        logger.info(f"Document {doc_id} '{original_title}': Image document detected, using vision model...")
+        content = doc.get("content", "")
+        original_title = doc.get("title", "")
         
-        # Download original image
-        original_image = paperless_client.get_document_original(doc_id)
-        if not original_image:
-            logger.error(f"Document {doc_id} '{original_title}': Could not fetch original image.")
+        # Try multiple possible field names for MIME type
+        mime_type = (
+            doc.get("original_mime_type") or 
+            doc.get("mime_type") or 
+            doc.get("media_type") or
+            ""
+        )
+        
+        # If not found in document response, try to get it from download headers
+        if not mime_type:
+            mime_type = paperless_client.get_document_mime_type(doc_id) or ""
+        
+        # If still not found, try to infer from original_filename extension
+        if not mime_type:
+            original_filename = doc.get("original_file_name", "") or doc.get("original_filename", "")
+            if original_filename:
+                guessed_type, _ = mimetypes.guess_type(original_filename)
+                if guessed_type:
+                    mime_type = guessed_type
+                    logger.info(f"Inferred MIME type from filename for document {doc_id}: {mime_type}")
+        
+        logger.info(f"Document {doc_id}: '{original_title}' (MIME: {mime_type})")
+        
+        # Check if this is an image document
+        if mime_type and mime_type.startswith("image/"):
+            logger.info(f"Document {doc_id} '{original_title}': Image document detected, using vision model...")
+            
+            # Download original image
+            original_image = paperless_client.get_document_original(doc_id)
+            if not original_image:
+                error_message = f"Document {doc_id} '{original_title}': Could not fetch original image."
+                logger.error(error_message)
+                if job_id:
+                    _update_document_job_error(job_id, doc_id, error_message)
+                return
+            
+            # Generate title from image
+            try:
+                new_title = ai_service.generate_title_from_image(original_image, original_title)
+            except Exception as e:
+                # Capture the full error chain from generate_title_from_image
+                error_message = f"Document {doc_id} '{original_title}': Vision model failed to generate title.\n{str(e)}"
+                logger.error(error_message)
+                if job_id:
+                    _update_document_job_error(job_id, doc_id, error_message)
+                return
+            
+            if new_title is None:
+                error_message = f"Document {doc_id} '{original_title}': Vision model failed to generate title."
+                logger.error(error_message)
+                if job_id:
+                    _update_document_job_error(job_id, doc_id, error_message)
+            elif new_title and new_title != original_title:
+                if settings.DRY_RUN:
+                    logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}' (vision)")
+                else:
+                    paperless_client.update_document(doc_id, new_title)
+                    # Archive the rename
+                    archive_title_rename(doc_id, original_title, new_title)
+                    # Index with vision-generated title
+                    ai_service.add_document_to_index(str(doc_id), content, new_title)
+            elif new_title == original_title:
+                logger.info(f"Document {doc_id} '{original_title}': Vision model thinks title is good enough.")
+            else:
+                logger.warning(f"Document {doc_id} '{original_title}': Vision model returned empty title.")
             return
         
-        # Generate title from image
-        new_title = ai_service.generate_title_from_image(original_image, original_title)
+        # For non-image documents, use text-based generation
+        if not content:
+            logger.warning(f"Document {doc_id} '{original_title}' has no content. Skipping.")
+            return
+
+        # 2. Generate New Title
+        try:
+            new_title = ai_service.generate_title(content, original_title)
+        except Exception as e:
+            # Capture the full error chain from generate_title
+            error_message = f"Document {doc_id} '{original_title}': Generation failed.\n{str(e)}"
+            logger.error(error_message)
+            if job_id:
+                _update_document_job_error(job_id, doc_id, error_message)
+            return
         
+        # 3. Update Paperless
         if new_title is None:
-            logger.error(f"Document {doc_id} '{original_title}': Vision model failed to generate title.")
+            error_message = f"Document {doc_id} '{original_title}': Generation failed."
+            logger.error(error_message)
+            if job_id:
+                _update_document_job_error(job_id, doc_id, error_message)
         elif new_title and new_title != original_title:
             if settings.DRY_RUN:
-                logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}' (vision)")
+                logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}'")
             else:
                 paperless_client.update_document(doc_id, new_title)
                 # Archive the rename
                 archive_title_rename(doc_id, original_title, new_title)
-                # Index with vision-generated title
+                # 4. Index the document with the NEW title for future RAG
                 ai_service.add_document_to_index(str(doc_id), content, new_title)
         elif new_title == original_title:
-            logger.info(f"Document {doc_id} '{original_title}': Vision model thinks title is good enough.")
+            logger.info(f"Document {doc_id} '{original_title}': LLM thinks title is good enough.")
         else:
-            logger.warning(f"Document {doc_id} '{original_title}': Vision model returned empty title.")
-        return
-    
-    # For non-image documents, use text-based generation
-    if not content:
-        logger.warning(f"Document {doc_id} '{original_title}' has no content. Skipping.")
-        return
+            # Empty or whitespace-only response
+            logger.warning(f"Document {doc_id} '{original_title}': LLM returned empty title.")
+    except Exception as e:
+        error_message = f"Document {doc_id}: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        if job_id:
+            _update_document_job_error(job_id, doc_id, error_message)
 
-    # 2. Generate New Title
-    new_title = ai_service.generate_title(content, original_title)
+def _update_document_job_error(job_id: str, doc_id: int, error_message: str):
+    """Update a document processing job with an error for a specific document."""
+    # Archive the error
+    job_type = "process" if job_id.startswith("process-") else "scan" if job_id.startswith("scan") or job_id == "scan" else "index"
+    archive_error(job_type=job_type, error_message=error_message, job_id=job_id, document_id=doc_id)
     
-    # 3. Update Paperless
-    if new_title is None:
-        logger.error(f"Document {doc_id} '{original_title}': Generation failed.")
-    elif new_title and new_title != original_title:
-        if settings.DRY_RUN:
-            logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}'")
-        else:
-            paperless_client.update_document(doc_id, new_title)
-            # Archive the rename
-            archive_title_rename(doc_id, original_title, new_title)
-            # 4. Index the document with the NEW title for future RAG
-            ai_service.add_document_to_index(str(doc_id), content, new_title)
-    elif new_title == original_title:
-        logger.info(f"Document {doc_id} '{original_title}': LLM thinks title is good enough.")
-    else:
-        # Empty or whitespace-only response
-        logger.warning(f"Document {doc_id} '{original_title}': LLM returned empty title.")
+    with progress_lock:
+        if job_id in jobs:
+            if "errors" not in jobs[job_id]:
+                jobs[job_id]["errors"] = []
+            jobs[job_id]["errors"].append({
+                "document_id": doc_id,
+                "error": error_message
+            })
+            jobs[job_id]["processed"] = jobs[job_id].get("processed", 0) + 1
+            _signal_progress_update(job_id)
 
 def _signal_progress_update(job_id: str):
     """Signal that progress has been updated for a job (thread-safe)."""
@@ -190,7 +243,7 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
         
         for doc in matching_docs:
             logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
-            process_document(doc["id"])
+            process_document(doc["id"], job_id)
             # Update processed count with throttling
             if job_id:
                 current_time = time.time()
@@ -212,7 +265,8 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
                     archive_scan_job(
                         total_documents=len(all_docs),
                         bad_title_documents=len(matching_docs),
-                        timestamp=jobs[job_id]["completed_at"]
+                        timestamp=jobs[job_id]["completed_at"],
+                        status="completed"
                     )
                     # Final signal
                     _signal_progress_update(job_id)
@@ -220,11 +274,22 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
     except Exception as e:
         logger.error(f"Error in scheduled_search_job: {e}")
         if job_id:
+            error_message = str(e)
+            # Archive the error
+            archive_error(job_type="scan", error_message=error_message, job_id=job_id)
             with progress_lock:
                 if job_id in jobs:
                     jobs[job_id]["status"] = "failed"
-                    jobs[job_id]["error"] = str(e)
+                    jobs[job_id]["error"] = error_message
                     jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    # Archive the failed scan job
+                    archive_scan_job(
+                        total_documents=len(all_docs) if 'all_docs' in locals() else 0,
+                        bad_title_documents=len(matching_docs) if 'matching_docs' in locals() else 0,
+                        timestamp=jobs[job_id]["completed_at"],
+                        status="failed",
+                        error=error_message
+                    )
                     _signal_progress_update(job_id)
 
 @asynccontextmanager
@@ -354,6 +419,47 @@ async def find_outliers(k_neighbors: int = 5, limit: int = 50):
         logger.error(f"Error finding outliers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def process_documents_batch(document_ids: list, job_id: str):
+    """Process a batch of documents and track progress/errors."""
+    try:
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["total"] = len(document_ids)
+                jobs[job_id]["processed"] = 0
+                jobs[job_id]["errors"] = []
+                jobs[job_id]["last_reported"] = time.time()
+        
+        for doc_id in document_ids:
+            process_document(doc_id, job_id)
+            # Update processed count with throttling
+            current_time = time.time()
+            with progress_lock:
+                if job_id in jobs:
+                    # Only signal if at least 1 second has passed since last report
+                    if current_time - jobs[job_id].get("last_reported", 0) >= 1.0:
+                        jobs[job_id]["last_reported"] = current_time
+                        _signal_progress_update(job_id)
+        
+        # Mark job as completed
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                _signal_progress_update(job_id)
+                _signal_all_jobs_update()
+    except Exception as e:
+        logger.error(f"Error in process_documents_batch: {e}")
+        error_message = str(e)
+        # Archive the error
+        archive_error(job_type="process", error_message=error_message, job_id=job_id)
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["status"] = "failed"
+                jobs[job_id]["error"] = error_message
+                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                _signal_progress_update(job_id)
+                _signal_all_jobs_update()
+
 @api_router.post("/process-documents")
 async def process_documents(background_tasks: BackgroundTasks, request: Request):
     """
@@ -367,14 +473,34 @@ async def process_documents(background_tasks: BackgroundTasks, request: Request)
         if not document_ids:
             raise HTTPException(status_code=400, detail="No document_ids provided")
         
-        # Queue each document for processing
-        for doc_id in document_ids:
-            background_tasks.add_task(process_document, doc_id)
+        # Create a job to track this batch of documents
+        job_id = f"process-{uuid.uuid4()}"
+        
+        with progress_lock:
+            jobs[job_id] = {
+                "status": "running",
+                "total": len(document_ids),
+                "processed": 0,
+                "created_at": datetime.now().isoformat(),
+                "errors": [],
+                "last_reported": time.time()
+            }
+            # Create events for long-polling
+            thread_event = ThreadEvent()
+            async_event = asyncio.Event()
+            progress_events[job_id] = (thread_event, async_event)
+        
+        # Process documents in background
+        background_tasks.add_task(process_documents_batch, document_ids, job_id)
+        
+        # Signal global event for long polling
+        _signal_all_jobs_update()
         
         return {
             "status": "processing_started",
             "document_count": len(document_ids),
-            "document_ids": document_ids
+            "document_ids": document_ids,
+            "job_id": job_id
         }
     except Exception as e:
         logger.error(f"Error processing documents: {e}")
@@ -486,7 +612,8 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     # Archive the index job
                     archive_index_job(
                         documents_indexed=count,
-                        timestamp=jobs[job_id]["completed_at"]
+                        timestamp=jobs[job_id]["completed_at"],
+                        status="completed"
                     )
                     # Final signal
                     _signal_progress_update(job_id)
@@ -494,11 +621,19 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
     except Exception as e:
         logger.error(f"Error in run_bulk_index: {e}")
         if job_id:
+            error_message = str(e)
             with progress_lock:
                 if job_id in jobs:
                     jobs[job_id]["status"] = "failed"
-                    jobs[job_id]["error"] = str(e)
+                    jobs[job_id]["error"] = error_message
                     jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    # Archive the failed index job
+                    archive_index_job(
+                        documents_indexed=count if 'count' in locals() else 0,
+                        timestamp=jobs[job_id]["completed_at"],
+                        status="failed",
+                        error=error_message
+                    )
                     _signal_progress_update(job_id)
 
 @api_router.post("/webhook")

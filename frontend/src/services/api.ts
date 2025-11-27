@@ -19,6 +19,7 @@ export interface ProgressResponse {
   newer_than?: string;
   older_than?: string;
   error?: string;
+  errors?: Array<{ document_id: number; error: string }>;
   jobs?: Record<string, ProgressResponse>;
 }
 
@@ -87,7 +88,7 @@ export const apiService = {
 
   // Get archive
   async getArchive(
-    type: 'index' | 'scan' | 'rename' | 'webhook',
+    type: 'index' | 'scan' | 'rename' | 'webhook' | 'error',
     page: number = 1,
     limit: number = 50,
     startDate?: string,

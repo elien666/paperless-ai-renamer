@@ -1,5 +1,6 @@
 import ActivityBar from './ActivityBar';
 import ArchiveBrowser from './ArchiveBrowser';
+import FloatingActionButton from './FloatingActionButton';
 import logo from '../assets/logo.svg';
 
 export default function Layout() {
@@ -19,10 +20,11 @@ export default function Layout() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto p-4 flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div className="container mx-auto p-4 flex-1 flex flex-col min-h-0 overflow-hidden relative">
         <div className="flex-1 min-h-0 flex flex-col">
           <ArchiveBrowser />
         </div>
+        <FloatingActionButton />
       </div>
     </div>
   );

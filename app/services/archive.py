@@ -58,7 +58,9 @@ def init_database():
             CREATE TABLE IF NOT EXISTS index_jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
-                documents_indexed INTEGER NOT NULL
+                documents_indexed INTEGER NOT NULL,
+                status TEXT,
+                error TEXT
             )
         """)
         
@@ -68,7 +70,9 @@ def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 total_documents INTEGER NOT NULL,
-                bad_title_documents INTEGER NOT NULL
+                bad_title_documents INTEGER NOT NULL,
+                status TEXT,
+                error TEXT
             )
         """)
         
@@ -92,6 +96,18 @@ def init_database():
             )
         """)
         
+        # Create error_archive table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS error_archive (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                job_id TEXT,
+                document_id INTEGER,
+                error_message TEXT NOT NULL
+            )
+        """)
+        
         # Create indexes for better query performance
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_jobs_timestamp ON index_jobs(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_scan_jobs_timestamp ON scan_jobs(timestamp)")
@@ -99,13 +115,15 @@ def init_database():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_title_renames_document_id ON title_renames(document_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_webhook_triggers_timestamp ON webhook_triggers(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_webhook_triggers_document_id ON webhook_triggers(document_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_error_archive_timestamp ON error_archive(timestamp)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_error_archive_job_type ON error_archive(job_type)")
         
         conn.commit()
         conn.close()
         logger.info(f"Archive database initialized at {db_path}")
 
-def archive_index_job(documents_indexed: int, timestamp: Optional[str] = None):
-    """Archive a completed index job."""
+def archive_index_job(documents_indexed: int, timestamp: Optional[str] = None, status: str = "completed", error: Optional[str] = None):
+    """Archive an index job (completed or failed)."""
     if timestamp is None:
         timestamp = datetime.now().isoformat()
     
@@ -114,15 +132,25 @@ def archive_index_job(documents_indexed: int, timestamp: Optional[str] = None):
     with db_lock:
         conn = sqlite3.connect(db_path, check_same_thread=False)
         cursor = conn.cursor()
+        # Try to add new columns if they don't exist (for backward compatibility)
+        try:
+            cursor.execute("ALTER TABLE index_jobs ADD COLUMN status TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            cursor.execute("ALTER TABLE index_jobs ADD COLUMN error TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
         cursor.execute(
-            "INSERT INTO index_jobs (timestamp, documents_indexed) VALUES (?, ?)",
-            (timestamp, documents_indexed)
+            "INSERT INTO index_jobs (timestamp, documents_indexed, status, error) VALUES (?, ?, ?, ?)",
+            (timestamp, documents_indexed, status, error)
         )
         conn.commit()
         conn.close()
 
-def archive_scan_job(total_documents: int, bad_title_documents: int, timestamp: Optional[str] = None):
-    """Archive a completed scan job."""
+def archive_scan_job(total_documents: int, bad_title_documents: int, timestamp: Optional[str] = None, status: str = "completed", error: Optional[str] = None):
+    """Archive a scan job (completed or failed)."""
     if timestamp is None:
         timestamp = datetime.now().isoformat()
     
@@ -131,9 +159,19 @@ def archive_scan_job(total_documents: int, bad_title_documents: int, timestamp: 
     with db_lock:
         conn = sqlite3.connect(db_path, check_same_thread=False)
         cursor = conn.cursor()
+        # Try to add new columns if they don't exist (for backward compatibility)
+        try:
+            cursor.execute("ALTER TABLE scan_jobs ADD COLUMN status TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            cursor.execute("ALTER TABLE scan_jobs ADD COLUMN error TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
         cursor.execute(
-            "INSERT INTO scan_jobs (timestamp, total_documents, bad_title_documents) VALUES (?, ?, ?)",
-            (timestamp, total_documents, bad_title_documents)
+            "INSERT INTO scan_jobs (timestamp, total_documents, bad_title_documents, status, error) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, total_documents, bad_title_documents, status, error)
         )
         conn.commit()
         conn.close()
@@ -172,6 +210,23 @@ def archive_webhook_trigger(document_id: int, timestamp: Optional[str] = None):
         conn.commit()
         conn.close()
 
+def archive_error(job_type: str, error_message: str, job_id: Optional[str] = None, document_id: Optional[int] = None, timestamp: Optional[str] = None):
+    """Archive an error."""
+    if timestamp is None:
+        timestamp = datetime.now().isoformat()
+    
+    db_path = get_db_path()
+    
+    with db_lock:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO error_archive (timestamp, job_type, job_id, document_id, error_message) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, job_type, job_id, document_id, error_message)
+        )
+        conn.commit()
+        conn.close()
+
 def query_archive(
     archive_type: str,
     page: int = 1,
@@ -199,7 +254,8 @@ def query_archive(
         'index': 'index_jobs',
         'scan': 'scan_jobs',
         'rename': 'title_renames',
-        'webhook': 'webhook_triggers'
+        'webhook': 'webhook_triggers',
+        'error': 'error_archive'
     }
     
     if archive_type not in table_map:

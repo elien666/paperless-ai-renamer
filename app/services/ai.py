@@ -138,8 +138,10 @@ class AIService:
             logger.info(f"Generated title: {new_title}")
             return new_title
         except requests.RequestException as e:
-            logger.error(f"Error calling Ollama: {e}")
-            return None # Failure
+            error_msg = f"Error calling Ollama: {e}"
+            logger.error(error_msg)
+            # Raise exception with full error details so caller can capture it
+            raise Exception(error_msg) from e
 
     def generate_title_from_image(self, image_bytes: bytes, original_title: str) -> Optional[str]:
         """Generate a title from an image using a vision model."""
@@ -177,5 +179,7 @@ class AIService:
             logger.info(f"Generated title from image: {new_title}")
             return new_title
         except requests.RequestException as e:
-            logger.error(f"Error calling Ollama vision model: {e}")
-            return None # Failure
+            error_msg = f"Error calling Ollama vision model: {e}"
+            logger.error(error_msg)
+            # Raise exception with full error details so caller can capture it
+            raise Exception(error_msg) from e # Failure
