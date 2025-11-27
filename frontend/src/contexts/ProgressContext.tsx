@@ -33,20 +33,16 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     if (ENABLE_MOCK_PROCESS) {
       return {
         'process-mock-12345': MOCK_PROCESS_JOB,
-      };
+      } as Record<string, ProgressResponse>;
     }
-    return {};
+    return {} as Record<string, ProgressResponse>;
   });
   const [loading, setLoading] = useState(true);
-  const previousProgressRef = useRef<Record<string, ProgressResponse>>(() => {
-    // Initialize previous progress with mock data if enabled
-    if (ENABLE_MOCK_PROCESS) {
-      return {
-        'process-mock-12345': MOCK_PROCESS_JOB,
-      };
-    }
-    return {};
-  });
+  const previousProgressRef = useRef<Record<string, ProgressResponse>>(
+    ENABLE_MOCK_PROCESS
+      ? { 'process-mock-12345': MOCK_PROCESS_JOB }
+      : {}
+  );
   const isMountedRef = useRef(true);
   const subscribersRef = useRef<Set<(progress: Record<string, ProgressResponse>, previous: Record<string, ProgressResponse>) => void>>(new Set());
 
