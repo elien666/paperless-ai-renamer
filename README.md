@@ -22,14 +22,51 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    cd paperless-agent-rename
    ```
 
-2. **Edit `docker-compose.yml`**:
-   Update the environment variables (see [Configuration](#configuration) below):
+2. **Create `docker-compose.yml`**:
+   Create a `docker-compose.yml` file based on the example below. Update the environment variables with your actual values (see [Configuration](#configuration) for all available options):
+   
    ```yaml
-   environment:
-     - PAPERLESS_API_URL=http://your-paperless-url:8000
-     - PAPERLESS_API_TOKEN=your_api_token_here
-     - BAD_TITLE_REGEX=^(Scan|\\\\d{4}[-/]\\\\d{2}[-/]\\\\d{2}).*
-     - DRY_RUN=True  # Set to False when ready to apply changes
+   services:
+     app:
+       build: .
+       container_name: paperless-ai-renamer
+       environment:
+         - PAPERLESS_API_URL=http://your-paperless-url:8000
+         - PAPERLESS_API_TOKEN=your_api_token_here
+         - OLLAMA_BASE_URL=http://host.docker.internal:11434
+         - LLM_MODEL=llama3
+         - VISION_MODEL=moondream
+         - LANGUAGE=German
+         - ENABLE_SCHEDULER=False
+         - BAD_TITLE_REGEX=^(Scan|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}).*
+         - DRY_RUN=True  # Set to False when ready to apply changes
+       volumes:
+         - ./app:/app/app
+         - ./data:/app/data
+       ports:
+         - "8000:8000"
+       restart: unless-stopped
+   
+     # Optional: Uncomment to run Ollama in Docker
+     # ollama:
+     #   image: ollama/ollama:latest
+     #   container_name: ollama
+     #   volumes:
+     #     - ollama_data:/root/.ollama
+     #   environment:
+     #     - OLLAMA_GPU_OVERHEAD=0
+     #   restart: unless-stopped
+     #   # Uncomment for GPU support (requires NVIDIA Container Toolkit)
+     #   # deploy:
+     #   #   resources:
+     #   #     reservations:
+     #   #       devices:
+     #   #         - driver: nvidia
+     #   #           count: 1
+     #   #           capabilities: [gpu]
+   
+   volumes:
+     ollama_data:
    ```
 
 3. **Start the Services**:
