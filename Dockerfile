@@ -48,6 +48,8 @@ COPY --from=python-builder /root/.local /root/.local
 
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
+# Set PYTHONPATH so Python can find the app module
+ENV PYTHONPATH=/app
 
 # Copy application code
 COPY app/ ./app/
