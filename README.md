@@ -1,6 +1,10 @@
+[![Build and Push Docker Image](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/docker-build.yml) [![Pytest](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/pytest.yml) [![Frontend Type Check](https://github.com/elien666/paperless-ai-renamer/actions/workflows/frontend-check.yml/badge.svg)](https://github.com/elien666/paperless-ai-renamer/actions/workflows/frontend-check.yml)
+
 # Paperless AI Renamer
 
 A local, Dockerized AI-powered service that integrates with Paperless-ngx to automatically rename documents using a local LLM and RAG (Retrieval Augmented Generation).
+
+![Web UI Screenshot](ui-screenshot.png)
 
 ## Features
 
@@ -23,53 +27,46 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    cd paperless-agent-rename
    ```
 
-2. **Create `docker-compose.yml`**:
-   Create a `docker-compose.yml` file based on the example below. Update the environment variables with your actual values (see [Configuration](#configuration) for all available options):
+2. **Add to `docker-compose.yml`**:
+   You can add this service to your existing Paperless `docker-compose.yml` file, or create a separate one. Update the environment variables with your actual values (see [Configuration](#configuration) for all available options):
    
    ```yaml
    services:
-     app:
+     renamer:
        image: ghcr.io/elien666/paperless-ai-renamer:latest
-       # For local development, see "Building the Docker Image Locally" section below
        container_name: paperless-ai-renamer
        environment:
-         - PAPERLESS_API_URL=http://your-paperless-url:8000
+         - PAPERLESS_API_URL=http://webserver:8000
          - PAPERLESS_API_TOKEN=your_api_token_here
-         - OLLAMA_BASE_URL=http://host.docker.internal:11434
+         - OLLAMA_BASE_URL=http://ollama:11434
          - LLM_MODEL=llama3
          - VISION_MODEL=moondream
          - LANGUAGE=German
          - ENABLE_SCHEDULER=False
          - BAD_TITLE_REGEX=^(Scan|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}).*
-         - DRY_RUN=True  # Set to False when ready to apply changes
        volumes:
-         - ./app:/app/app
-         - ./data:/app/data
+         - renamer_data:/app/data
        ports:
-         - "8000:8000"
+         - "8337:8000"
        restart: unless-stopped
    
-     # Optional: Uncomment to run Ollama in Docker
-     # ollama:
-     #   image: ollama/ollama:latest
-     #   container_name: ollama
-     #   volumes:
-     #     - ollama_data:/root/.ollama
-     #   environment:
-     #     - OLLAMA_GPU_OVERHEAD=0
-     #   restart: unless-stopped
-     #   # Uncomment for GPU support (requires NVIDIA Container Toolkit)
-     #   # deploy:
-     #   #   resources:
-     #   #     reservations:
-     #   #       devices:
-     #   #         - driver: nvidia
-     #   #           count: 1
-     #   #           capabilities: [gpu]
+     ollama:
+       image: ollama/ollama:latest
+       container_name: ollama
+       volumes:
+         - ollama_data:/root/.ollama
+       environment:
+         - OLLAMA_GPU_OVERHEAD=0
+       restart: unless-stopped
    
    volumes:
+     renamer_data:
      ollama_data:
    ```
+   
+   **Note**: If adding to your existing Paperless `docker-compose.yml`, make sure the `PAPERLESS_API_URL` matches your Paperless webserver service name (typically `webserver`). The `renamer` service will automatically connect to Paperless on the same Docker network.
+   
+   **Port Configuration**: The example uses port `8337:8000` (host:container). You can customize the host port (first number) if needed, but keep the container port as `8000`. All API examples in this README assume port `8337` on the host.
 
 3. **Start the Services**:
    ```bash
@@ -85,15 +82,15 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
 
 5. **Build Your Baseline** (Index existing "good" documents):
    ```bash
-   curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
+   curl -X POST "http://localhost:8337/index?older_than=2024-01-01"
    ```
 
 6. **Access the Web UI**:
-   Open your browser and navigate to `http://localhost:8000` to access the web interface.
+   Open your browser and navigate to `http://localhost:8337` to access the web interface.
 
 7. **Test with a Scan**:
    ```bash
-   curl -X POST "http://localhost:8000/scan?newer_than=2024-01-01"
+   curl -X POST "http://localhost:8337/scan?newer_than=2024-01-01"
    ```
    Or use the web UI to trigger scans and monitor progress.
 
@@ -138,19 +135,19 @@ Replace `elien666` with your GitHub username or organization.
 ### Manual Scan
 Trigger a search for documents with "bad" titles:
 ```bash
-curl -X POST "http://localhost:8000/scan?newer_than=2025-11-01"
+curl -X POST "http://localhost:8337/scan?newer_than=2025-11-01"
 ```
 
 ### Bulk Index
 Build your baseline by indexing existing documents with good titles:
 ```bash
-curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
+curl -X POST "http://localhost:8337/index?older_than=2024-01-01"
 ```
 
 ### Find Outliers
 Identify documents that are isolated in the vector space (likely have poor titles):
 ```bash
-curl -X GET "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
+curl -X GET "http://localhost:8337/find-outliers?k_neighbors=5&limit=50"
 ```
 
 **Parameters**:
@@ -179,7 +176,7 @@ curl -X GET "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
 ### Process Specific Documents
 Process a list of document IDs for renaming:
 ```bash
-curl -X POST "http://localhost:8000/process-documents" \
+curl -X POST "http://localhost:8337/process-documents" \
   -H "Content-Type: application/json" \
   -d '{"document_ids": [123, 456, 789]}'
 ```
@@ -188,7 +185,7 @@ curl -X POST "http://localhost:8000/process-documents" \
 
 Configure Paperless-ngx to send webhooks:
 1. Go to Paperless Settings → Webhooks
-2. Add webhook URL: `http://paperless-ai-renamer:8000/webhook`
+2. Add webhook URL: `http://renamer:8000/webhook` (use the service name from your docker-compose.yml)
 3. Set trigger to `DOCUMENT_ADDED` or `DOCUMENT_CREATED`
 
 #### Webhook Flow Explained
@@ -215,7 +212,7 @@ When a document is uploaded to Paperless, the following happens automatically:
 
 ### Health Check
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8337/health
 ```
 
 ## Configuration
@@ -304,20 +301,20 @@ For complete API documentation, see:
 #### `GET /health`
 Simple health check to verify the service is running.
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8337/health
 ```
 
 #### `POST /scan`
 Manually trigger a search for documents matching `BAD_TITLE_REGEX`. Returns a `job_id` for tracking progress.
 ```bash
-curl -X POST "http://localhost:8000/scan?newer_than=2024-01-01"
+curl -X POST "http://localhost:8337/scan?newer_than=2024-01-01"
 # Response: {"status": "scan_started", "job_id": "uuid", "newer_than": "2024-01-01"}
 ```
 
 #### `POST /index`
 Index existing documents with good titles into the vector database. Use this to build your baseline before scanning. Returns a `job_id` (always `"index"`) for tracking progress. Only one index job can run at a time - if you try to start a new one while another is running, you'll get a 409 Conflict error.
 ```bash
-curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
+curl -X POST "http://localhost:8337/index?older_than=2024-01-01"
 # Response: {"status": "indexing_started", "job_id": "index", "older_than": "2024-01-01"}
 
 # If already running:
@@ -327,13 +324,13 @@ curl -X POST "http://localhost:8000/index?older_than=2024-01-01"
 #### `GET /find-outliers`
 Find documents that are outliers in the vector space (likely have poor titles). See [Find Outliers](#find-outliers) section for detailed explanation.
 ```bash
-curl "http://localhost:8000/find-outliers?k_neighbors=5&limit=50"
+curl "http://localhost:8337/find-outliers?k_neighbors=5&limit=50"
 ```
 
 #### `POST /process-documents`
 Process a specific list of document IDs. Useful for targeting specific documents.
 ```bash
-curl -X POST "http://localhost:8000/process-documents" \
+curl -X POST "http://localhost:8337/process-documents" \
   -H "Content-Type: application/json" \
   -d '{"document_ids": [123, 456, 789]}'
 ```
@@ -342,13 +339,13 @@ curl -X POST "http://localhost:8000/process-documents" \
 Get progress information for scan and index jobs. Without `job_id`, returns all jobs including the index job (if exists). Use `job_id=index` to query the index job specifically.
 ```bash
 # Get all jobs (includes scan jobs and index job if exists)
-curl "http://localhost:8000/progress"
+curl "http://localhost:8337/progress"
 
 # Get specific scan job
-curl "http://localhost:8000/progress?job_id=your-scan-job-id"
+curl "http://localhost:8337/progress?job_id=your-scan-job-id"
 
 # Get index job status
-curl "http://localhost:8000/progress?job_id=index"
+curl "http://localhost:8337/progress?job_id=index"
 ```
 
 Progress response for index job includes:
@@ -443,7 +440,7 @@ If image documents are still not being processed, check:
 
 ## Web UI
 
-The project includes a modern React-based web interface accessible at `http://localhost:8000` (when running in Docker) or `http://localhost:5173` (in development mode).
+The project includes a modern React-based web interface accessible at `http://localhost:8337` (when running in Docker with the example configuration) or `http://localhost:5173` (in development mode).
 
 ### Features
 
