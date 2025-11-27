@@ -1,9 +1,9 @@
 services:
   app:
     # For local testing: build from local Dockerfile
-    build: .
+    # build: .
     # For production: use pre-built image from GitHub Container Registry
-    # image: ghcr.io/elien666/paperless-ai-renamer:latest
+    image: ghcr.io/elien666/paperless-ai-renamer:latest
     # Replace elien666 with your GitHub username or organization
     container_name: paperless-ai-renamer
     environment:
@@ -19,8 +19,9 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-chroma/all-minilm-l6-v2-f32}
       - CHROMA_DB_PATH=${CHROMA_DB_PATH:-/app/data/chroma}
     volumes:
-      - ./app:/app/app
-      - ./data:/app/data
+      # For local development
+      #- ./app:/app/app
+      - data:/app/data
     #depends_on:
     #  - ollama
     ports:
@@ -48,4 +49,5 @@ services:
     #           capabilities: [gpu]
 
 volumes:
+  data:
   ollama_data:
