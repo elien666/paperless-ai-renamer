@@ -178,7 +178,14 @@ def process_document(doc_id: int, job_id: str = None):
 def _update_document_job_error(job_id: str, doc_id: int, error_message: str):
     """Update a document processing job with an error for a specific document."""
     # Archive the error
-    job_type = "process" if job_id.startswith("process-") else "scan" if job_id.startswith("scan") or job_id == "scan" else "index"
+    if job_id.startswith("webhook-"):
+        job_type = "webhook"
+    elif job_id.startswith("process-"):
+        job_type = "process"
+    elif job_id.startswith("scan") or job_id == "scan":
+        job_type = "scan"
+    else:
+        job_type = "index"
     archive_error(job_type=job_type, error_message=error_message, job_id=job_id, document_id=doc_id)
     
     with progress_lock:
@@ -637,6 +644,52 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     )
                     _signal_progress_update(job_id)
 
+def process_document_with_progress(doc_id: int, job_id: str):
+    """Process a single document with progress tracking."""
+    try:
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["total"] = 1
+                jobs[job_id]["processed"] = 0
+                jobs[job_id]["errors"] = []
+                jobs[job_id]["last_reported"] = time.time()
+        
+        # Process the document
+        process_document(doc_id, job_id)
+        
+        # Update processed count if not already updated by error handler
+        current_time = time.time()
+        with progress_lock:
+            if job_id in jobs:
+                # Only update if not already processed (error handler may have already incremented it)
+                if jobs[job_id]["processed"] == 0:
+                    jobs[job_id]["processed"] = 1
+                    jobs[job_id]["last_reported"] = current_time
+                    _signal_progress_update(job_id)
+        
+        # Mark job as completed
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                _signal_progress_update(job_id)
+                _signal_all_jobs_update()
+    except Exception as e:
+        logger.error(f"Error in process_document_with_progress: {e}")
+        error_message = str(e)
+        # Archive the error (job_type will be determined from job_id prefix by archive_error if needed)
+        archive_error(job_type="process", error_message=error_message, job_id=job_id, document_id=doc_id)
+        with progress_lock:
+            if job_id in jobs:
+                jobs[job_id]["status"] = "failed"
+                jobs[job_id]["error"] = error_message
+                jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                # Ensure processed is set if not already set by process_document error handler
+                if jobs[job_id]["processed"] == 0:
+                    jobs[job_id]["processed"] = 1
+                _signal_progress_update(job_id)
+                _signal_all_jobs_update()
+
 @api_router.post("/webhook")
 async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
     """Handle incoming webhooks from Paperless."""
@@ -652,8 +705,33 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         if doc_id:
             # Archive the webhook trigger
             archive_webhook_trigger(doc_id)
-            background_tasks.add_task(process_document, doc_id)
-            return {"status": "processing_started", "document_id": doc_id}
+            
+            # Create a job to track this webhook-triggered document processing
+            # Use 'process-' prefix so frontend recognizes it as a Process job
+            job_id = f"process-{uuid.uuid4()}"
+            
+            with progress_lock:
+                jobs[job_id] = {
+                    "status": "running",
+                    "total": 1,
+                    "processed": 0,
+                    "created_at": datetime.now().isoformat(),
+                    "document_id": doc_id,
+                    "errors": [],
+                    "last_reported": time.time()
+                }
+                # Create events for long-polling
+                thread_event = ThreadEvent()
+                async_event = asyncio.Event()
+                progress_events[job_id] = (thread_event, async_event)
+            
+            # Process document in background with progress tracking
+            background_tasks.add_task(process_document_with_progress, doc_id, job_id)
+            
+            # Signal global event for long polling
+            _signal_all_jobs_update()
+            
+            return {"status": "processing_started", "document_id": doc_id, "job_id": job_id}
         else:
             # It might be a different event type or payload
             logger.warning("Webhook payload missing document_id")

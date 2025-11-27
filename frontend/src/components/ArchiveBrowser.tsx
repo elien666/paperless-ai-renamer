@@ -141,7 +141,11 @@ export default function ArchiveBrowser() {
         }
         
         // If job status changed from 'running' to 'completed' or 'failed'
-        if (previousJob?.status === 'running' && (job.status === 'completed' || job.status === 'failed')) {
+        // OR if a job is now completed and wasn't completed before (handles jobs that complete quickly)
+        const jobJustCompleted = previousJob?.status === 'running' && (job.status === 'completed' || job.status === 'failed');
+        const jobNowCompleted = (job.status === 'completed' || job.status === 'failed') && previousJob?.status !== job.status;
+        
+        if (jobJustCompleted || jobNowCompleted) {
           // Refresh relevant archive data - use setTimeout to ensure state updates are processed
           setTimeout(() => {
             if (jobId === 'index') {
@@ -153,6 +157,7 @@ export default function ArchiveBrowser() {
             }
             
             // Always refresh rename archive when any job completes (jobs might create rename entries)
+            // This is especially important for process jobs (including webhook-triggered) which create rename entries
             fetchArchive('rename', 1, false, true);
             
             // Always refresh error archive when any job completes or fails (new errors may have been created)
