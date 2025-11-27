@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from threading import Lock
 import logging
@@ -125,7 +125,7 @@ def init_database():
 def archive_index_job(documents_indexed: int, timestamp: Optional[str] = None, status: str = "completed", error: Optional[str] = None):
     """Archive an index job (completed or failed)."""
     if timestamp is None:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
     
     db_path = get_db_path()
     
@@ -152,7 +152,7 @@ def archive_index_job(documents_indexed: int, timestamp: Optional[str] = None, s
 def archive_scan_job(total_documents: int, bad_title_documents: int, timestamp: Optional[str] = None, status: str = "completed", error: Optional[str] = None):
     """Archive a scan job (completed or failed)."""
     if timestamp is None:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
     
     db_path = get_db_path()
     
@@ -179,7 +179,7 @@ def archive_scan_job(total_documents: int, bad_title_documents: int, timestamp: 
 def archive_title_rename(document_id: int, old_title: str, new_title: str, timestamp: Optional[str] = None):
     """Archive a title rename action."""
     if timestamp is None:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
     
     db_path = get_db_path()
     
@@ -196,7 +196,7 @@ def archive_title_rename(document_id: int, old_title: str, new_title: str, times
 def archive_webhook_trigger(document_id: int, timestamp: Optional[str] = None):
     """Archive a webhook trigger."""
     if timestamp is None:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
     
     db_path = get_db_path()
     
@@ -213,7 +213,7 @@ def archive_webhook_trigger(document_id: int, timestamp: Optional[str] = None):
 def archive_error(job_type: str, error_message: str, job_id: Optional[str] = None, document_id: Optional[int] = None, timestamp: Optional[str] = None):
     """Archive an error."""
     if timestamp is None:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
     
     db_path = get_db_path()
     
