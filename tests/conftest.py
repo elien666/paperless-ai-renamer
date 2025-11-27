@@ -9,7 +9,7 @@ import sys
 # Mock external dependencies before importing app modules
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
-sys.modules['sentence_transformers'] = MagicMock()
+# sentence-transformers removed - using Ollama for embeddings
 sys.modules['apscheduler'] = MagicMock()
 sys.modules['apscheduler.schedulers'] = MagicMock()
 sys.modules['apscheduler.schedulers.background'] = MagicMock()
@@ -26,7 +26,7 @@ def mock_settings():
     settings.ENABLE_SCHEDULER = False
     settings.BAD_TITLE_REGEX = "^Scan.*"
     settings.DRY_RUN = False
-    settings.EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    settings.EMBEDDING_MODEL = "chroma/all-minilm-l6-v2-f32"
     settings.CHROMA_DB_PATH = "/tmp/test-chroma"
     settings.LLM_MODEL = "llama3"
     settings.VISION_MODEL = "moondream"
@@ -82,13 +82,12 @@ def mock_chroma_client():
     return mock_client, mock_collection
 
 @pytest.fixture
-def mock_sentence_transformer():
-    """Mock SentenceTransformer model."""
-    mock_model = MagicMock()
-    mock_embedding = MagicMock()
-    mock_embedding.tolist.return_value = [0.1] * 384
-    mock_model.encode.return_value = mock_embedding
-    return mock_model
+def mock_ollama_embeddings():
+    """Mock Ollama embeddings API response."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"embedding": [0.1] * 384}
+    mock_response.raise_for_status = MagicMock()
+    return mock_response
 
 @pytest.fixture
 def mock_requests():
@@ -108,16 +107,15 @@ def temp_db_path():
 def app_client(mock_settings):
     """FastAPI test client with mocked dependencies."""
     with patch('app.config.get_settings', return_value=mock_settings), \
-         patch('app.services.ai.SentenceTransformer') as mock_st, \
+         patch('app.services.ai.requests') as mock_requests, \
          patch('app.services.ai.chromadb.PersistentClient') as mock_chroma, \
          patch('app.services.archive.get_db_path') as mock_db_path:
         
-        # Setup mocks
-        mock_model = MagicMock()
-        mock_embedding = MagicMock()
-        mock_embedding.tolist.return_value = [0.1] * 384
-        mock_model.encode.return_value = mock_embedding
-        mock_st.return_value = mock_model
+        # Setup Ollama embeddings mock
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"embedding": [0.1] * 384}
+        mock_response.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_response
         
         mock_collection = MagicMock()
         mock_collection.get.return_value = {

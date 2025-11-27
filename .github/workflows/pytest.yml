@@ -2,29 +2,18 @@ name: Pytest
 
 # This workflow runs pytest on:
 # - Every push to non-default branches (any branch except 'main')
-# - Every pull request targeting the default branch ('main')
 #
-# To fully guard PRs and require passing tests before merge:
-# 1. Go to GitHub repository Settings > Branches
-# 2. Add a branch protection rule for 'main'
-# 3. Enable "Require status checks to pass before merging"
-# 4. Select "test" (this job) as a required check
+# Note: Tests run on push, so PRs will already have test results from the branch push
 
 on:
   push:
     branches-ignore:
       - main
       - master
-  pull_request:
-    branches:
-      - main
-      - master
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Skip if push event is to main/master branch
-    if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
     
     steps:
     - name: Checkout code

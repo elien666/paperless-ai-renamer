@@ -49,11 +49,6 @@ COPY --from=python-builder /root/.local /root/.local
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
 
-# Ensure models are downloaded at runtime, not bundled
-# Set cache directory to a volume mount point so models persist but aren't in image
-ENV TRANSFORMERS_CACHE=/app/data/.cache/transformers
-ENV SENTENCE_TRANSFORMERS_HOME=/app/data/.cache/sentence-transformers
-
 # Copy application code
 COPY app/ ./app/
 

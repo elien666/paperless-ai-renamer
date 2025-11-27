@@ -40,7 +40,7 @@ def test_settings_default_values():
         assert settings.CRON_SCHEDULE == "*/30 * * * *"
         assert settings.ENABLE_SCHEDULER is False
         assert settings.DRY_RUN is False
-        assert settings.EMBEDDING_MODEL == "all-MiniLM-L6-v2"
+        assert settings.EMBEDDING_MODEL == "chroma/all-minilm-l6-v2-f32"
         # VISION_MODEL might be overridden by env, just check it's a string
         assert isinstance(settings.VISION_MODEL, str)
         assert len(settings.VISION_MODEL) > 0

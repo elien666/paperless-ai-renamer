@@ -76,10 +76,11 @@ A local, Dockerized AI-powered service that integrates with Paperless-ngx to aut
    docker-compose up -d
    ```
 
-4. **Pull the LLM Models**:
+4. **Pull the Required Models**:
    ```bash
    docker exec -it ollama ollama pull llama3
    docker exec -it ollama ollama pull moondream  # For image document processing
+   docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # For embeddings (vector search)
    ```
 
 5. **Build Your Baseline** (Index existing "good" documents):
@@ -234,7 +235,7 @@ Configure the service by editing the `environment` section in `docker-compose.ym
 | `PROMPT_TEMPLATE` | *See default in code* | Custom prompt for the LLM. Must include `{language}`, `{examples}`, `{content}`, `{filename}` |
 | `VISION_MODEL` | `moondream` | The Ollama vision model to use for image documents |
 | `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | SentenceTransformer model for embeddings |
+| `EMBEDDING_MODEL` | `chroma/all-minilm-l6-v2-f32` | Ollama embedding model name (e.g., `chroma/all-minilm-l6-v2-f32`) |
 | `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
 
 ### Getting Your Paperless API Token
@@ -416,13 +417,18 @@ The frontend is served as static files by FastAPI in production, or runs as a se
 - Check logs: `docker-compose logs -f app`
 
 ### Embedding model not found
-The `sentence-transformers` library downloads the model automatically on first use. You'll see "Batches: 100%" in the logs when generating embeddings.
+Ensure you've pulled the embedding model in Ollama:
+```bash
+docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32
+```
+The embedding model is used for finding similar documents to provide context for title generation.
 
 ### LLM not responding
-Ensure you've pulled the models:
+Ensure you've pulled all required models in Ollama:
 ```bash
 docker exec -it ollama ollama pull llama3
 docker exec -it ollama ollama pull moondream  # Required for image documents
+docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32  # Required for embeddings
 ```
 
 ### MIME type not detected
@@ -504,8 +510,8 @@ For local development, you can run the frontend and backend separately for hot-r
    BAD_TITLE_REGEX=^(Scan|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}).*
    DRY_RUN=True
    
-   # Embedding Model
-   EMBEDDING_MODEL=all-MiniLM-L6-v2
+   # Embedding Model (Ollama model name)
+   EMBEDDING_MODEL=chroma/all-minilm-l6-v2-f32
    
    # Data Path (for local dev, use relative path)
    CHROMA_DB_PATH=./data/chroma
