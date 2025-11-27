@@ -1,14 +1,21 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
-from threading import Lock
+from threading import Lock, Event as ThreadEvent
 import uuid
 import mimetypes
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import asyncio
+import time
 
 # Global progress tracking
 progress_lock = Lock()
-# jobs structure: { job_id: { "status": "running"|"completed"|"failed", "total": 0, "processed": 0, "created_at": timestamp, "newer_than": str } }
+# jobs structure: { job_id: { "status": "running"|"completed"|"failed", "total": 0, "processed": 0, "created_at": timestamp, "newer_than": str, "last_reported": float } }
 jobs: Dict[str, Any] = {}
+# Progress events for long-polling: { job_id: (asyncio.Event, threading.Event) }
+# We use both: threading.Event for thread-safe signaling, asyncio.Event for async waiting
+progress_events: Dict[str, tuple] = {}
+# Store reference to the main event loop for thread-safe callbacks
+_main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
@@ -16,6 +23,14 @@ import logging
 from app.config import get_settings
 from app.services.paperless import PaperlessClient
 from app.services.ai import AIService
+from app.services.archive import (
+    init_database,
+    archive_index_job,
+    archive_scan_job,
+    archive_title_rename,
+    archive_webhook_trigger,
+    query_archive
+)
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -84,6 +99,8 @@ def process_document(doc_id: int):
                 logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}' (vision)")
             else:
                 paperless_client.update_document(doc_id, new_title)
+                # Archive the rename
+                archive_title_rename(doc_id, original_title, new_title)
                 # Index with vision-generated title
                 ai_service.add_document_to_index(str(doc_id), content, new_title)
         elif new_title == original_title:
@@ -108,6 +125,8 @@ def process_document(doc_id: int):
             logger.info(f"[DRY RUN] Would update document {doc_id} from '{original_title}' to '{new_title}'")
         else:
             paperless_client.update_document(doc_id, new_title)
+            # Archive the rename
+            archive_title_rename(doc_id, original_title, new_title)
             # 4. Index the document with the NEW title for future RAG
             ai_service.add_document_to_index(str(doc_id), content, new_title)
     elif new_title == original_title:
@@ -115,6 +134,17 @@ def process_document(doc_id: int):
     else:
         # Empty or whitespace-only response
         logger.warning(f"Document {doc_id} '{original_title}': LLM returned empty title.")
+
+def _signal_progress_update(job_id: str):
+    """Signal that progress has been updated for a job (thread-safe)."""
+    if job_id in progress_events:
+        thread_event, async_event = progress_events[job_id]
+        # Set the thread event (thread-safe)
+        thread_event.set()
+        # Signal the async event from the main event loop
+        global _main_event_loop
+        if _main_event_loop is not None and _main_event_loop.is_running():
+            _main_event_loop.call_soon_threadsafe(async_event.set)
 
 def scheduled_search_job(newer_than: str = None, job_id: str = None):
     """Periodic job to find and process documents with bad titles."""
@@ -139,21 +169,36 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
                 if job_id in jobs:
                     jobs[job_id]["total"] = len(matching_docs)
                     jobs[job_id]["processed"] = 0
+                    jobs[job_id]["last_reported"] = time.time()
         
         for doc in matching_docs:
             logger.info(f"Queuing document {doc['id']}: '{doc.get('title', 'N/A')}'")
             process_document(doc["id"])
-            # Update processed count
+            # Update processed count with throttling
             if job_id:
+                current_time = time.time()
                 with progress_lock:
                     if job_id in jobs:
                         jobs[job_id]["processed"] += 1
+                        # Only signal if at least 1 second has passed since last report
+                        if current_time - jobs[job_id].get("last_reported", 0) >= 1.0:
+                            jobs[job_id]["last_reported"] = current_time
+                            _signal_progress_update(job_id)
         
         # Mark job as completed
         if job_id:
             with progress_lock:
                 if job_id in jobs:
                     jobs[job_id]["status"] = "completed"
+                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    # Archive the scan job
+                    archive_scan_job(
+                        total_documents=len(all_docs),
+                        bad_title_documents=len(matching_docs),
+                        timestamp=jobs[job_id]["completed_at"]
+                    )
+                    # Final signal
+                    _signal_progress_update(job_id)
                     
     except Exception as e:
         logger.error(f"Error in scheduled_search_job: {e}")
@@ -162,11 +207,20 @@ def scheduled_search_job(newer_than: str = None, job_id: str = None):
                 if job_id in jobs:
                     jobs[job_id]["status"] = "failed"
                     jobs[job_id]["error"] = str(e)
+                    jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    _signal_progress_update(job_id)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up Paperless AI Renamer...")
+    
+    # Store reference to the main event loop for thread-safe callbacks
+    global _main_event_loop
+    _main_event_loop = asyncio.get_event_loop()
+    
+    # Initialize archive database
+    init_database()
     
     # Initialize Scheduler
     scheduler = BackgroundScheduler()
@@ -187,6 +241,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     if scheduler.running:
         scheduler.shutdown()
+    _main_event_loop = None
 
 app = FastAPI(lifespan=lifespan)
 
@@ -205,8 +260,13 @@ async def trigger_scan(background_tasks: BackgroundTasks, newer_than: str = None
             "total": 0,
             "processed": 0,
             "created_at": datetime.now().isoformat(),
-            "newer_than": newer_than
+            "newer_than": newer_than,
+            "last_reported": time.time()
         }
+        # Create events for long-polling (thread-safe + async)
+        thread_event = ThreadEvent()
+        async_event = asyncio.Event()
+        progress_events[job_id] = (thread_event, async_event)
     
     background_tasks.add_task(scheduled_search_job, newer_than, job_id)
     return {"status": "scan_started", "job_id": job_id, "newer_than": newer_than}
@@ -235,8 +295,13 @@ async def trigger_index(background_tasks: BackgroundTasks, older_than: str = Non
             "total": 0,
             "processed": 0,
             "created_at": datetime.now().isoformat(),
-            "older_than": older_than
+            "older_than": older_than,
+            "last_reported": time.time()
         }
+        # Create events for long-polling (thread-safe + async)
+        thread_event = ThreadEvent()
+        async_event = asyncio.Event()
+        progress_events[job_id] = (thread_event, async_event)
     
     background_tasks.add_task(run_bulk_index, older_than, job_id)
     return {"status": "indexing_started", "job_id": job_id, "older_than": older_than}
@@ -305,6 +370,7 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                 if job_id in jobs:
                     jobs[job_id]["total"] = len(all_docs)
                     jobs[job_id]["processed"] = 0
+                    jobs[job_id]["last_reported"] = time.time()
         
         # 2. Filter and Index
         count = 0
@@ -321,11 +387,16 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
             content = doc.get("content", "")
             doc_id = doc.get("id")
             
-            # Update processed count (even if we skip this document)
+            # Update processed count with throttling (even if we skip this document)
             if job_id:
+                current_time = time.time()
                 with progress_lock:
                     if job_id in jobs:
                         jobs[job_id]["processed"] += 1
+                        # Only signal if at least 1 second has passed since last report
+                        if current_time - jobs[job_id].get("last_reported", 0) >= 1.0:
+                            jobs[job_id]["last_reported"] = current_time
+                            _signal_progress_update(job_id)
             
             if not content or not title:
                 continue
@@ -385,6 +456,13 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     jobs[job_id]["skipped_scan"] = skipped_scan
                     jobs[job_id]["cleaned"] = cleaned
                     jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    # Archive the index job
+                    archive_index_job(
+                        documents_indexed=count,
+                        timestamp=jobs[job_id]["completed_at"]
+                    )
+                    # Final signal
+                    _signal_progress_update(job_id)
                     
     except Exception as e:
         logger.error(f"Error in run_bulk_index: {e}")
@@ -394,6 +472,7 @@ def run_bulk_index(older_than: str = None, job_id: str = None):
                     jobs[job_id]["status"] = "failed"
                     jobs[job_id]["error"] = str(e)
                     jobs[job_id]["completed_at"] = datetime.now().isoformat()
+                    _signal_progress_update(job_id)
 
 @app.post("/webhook")
 async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -408,6 +487,8 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         
         doc_id = payload.get("document_id")
         if doc_id:
+            # Archive the webhook trigger
+            archive_webhook_trigger(doc_id)
             background_tasks.add_task(process_document, doc_id)
             return {"status": "processing_started", "document_id": doc_id}
         else:
@@ -424,18 +505,106 @@ def health_check():
     return {"status": "ok"}
 
 @app.get("/progress")
-def get_progress(job_id: str = None):
+async def get_progress(
+    job_id: Optional[str] = None,
+    wait: bool = False,
+    timeout: int = 60
+):
     """
     Get progress of scan and index jobs.
     If job_id is provided, returns details for that specific job (use 'index' for index job).
     If no job_id is provided, returns all jobs including the index job (if exists).
+    
+    Args:
+        job_id: Optional job ID to query
+        wait: If True, wait for progress updates (long-polling). Default: False
+        timeout: Maximum time to wait in seconds when wait=True. Default: 60
     """
-    with progress_lock:
-        if job_id:
+    if not wait:
+        # Regular polling mode - immediate response
+        with progress_lock:
+            if job_id:
+                job = jobs.get(job_id)
+                if not job:
+                    raise HTTPException(status_code=404, detail="Job not found")
+                return job
+            else:
+                # Return all jobs, including index job if it exists
+                return {"jobs": jobs}
+    else:
+        # Long-polling mode - wait for updates
+        if not job_id:
+            raise HTTPException(
+                status_code=400,
+                detail="job_id is required when wait=true"
+            )
+        
+        # Get initial state
+        with progress_lock:
+            job = jobs.get(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            
+            # If job is already completed or failed, return immediately
+            if job.get("status") in ("completed", "failed"):
+                return job
+            
+            # Get the event for this job, create if it doesn't exist
+            if job_id not in progress_events:
+                thread_event = ThreadEvent()
+                async_event = asyncio.Event()
+                progress_events[job_id] = (thread_event, async_event)
+            
+            thread_event, async_event = progress_events[job_id]
+            initial_processed = job.get("processed", 0)
+        
+        # Wait for progress update or timeout
+        try:
+            await asyncio.wait_for(async_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            # Timeout reached, return current state
+            pass
+        
+        # Clear the events for next wait cycle
+        async_event.clear()
+        thread_event.clear()
+        
+        # Return current state
+        with progress_lock:
             job = jobs.get(job_id)
             if not job:
                 raise HTTPException(status_code=404, detail="Job not found")
             return job
-        else:
-            # Return all jobs, including index job if it exists
-            return {"jobs": jobs}
+
+@app.get("/archive")
+async def get_archive(
+    type: str,
+    page: int = 1,
+    limit: int = 50,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Query the job archive with pagination.
+    
+    Args:
+        type: Archive type - one of 'index', 'scan', 'rename', 'webhook'
+        page: Page number (1-indexed). Default: 1
+        limit: Number of results per page. Default: 50
+        start_date: Optional start date filter (ISO format)
+        end_date: Optional end date filter (ISO format)
+    """
+    try:
+        result = query_archive(
+            archive_type=type,
+            page=page,
+            limit=limit,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error querying archive: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
