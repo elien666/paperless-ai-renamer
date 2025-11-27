@@ -216,6 +216,7 @@ def test_generate_title_template_error(mock_settings, mock_chroma_client, mock_s
     mock_client, mock_collection = mock_chroma_client
     
     with patch('app.services.ai.get_settings', return_value=mock_settings), \
+         patch('app.services.ai.settings', mock_settings), \
          patch('app.services.ai.SentenceTransformer', return_value=mock_sentence_transformer), \
          patch('app.services.ai.chromadb.PersistentClient', return_value=mock_client):
         service = AIService()

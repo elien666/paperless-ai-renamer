@@ -11,7 +11,6 @@ export default function ActivityBar() {
   const { progress, loading, subscribe } = useProgress();
   const [displayedProgress, setDisplayedProgress] = useState<Record<string, ProgressResponse>>({});
   const [toastMessage, setToastMessage] = useState<{ type: 'error'; text: string } | null>(null);
-  const previousProgressRef = useRef<Record<string, ProgressResponse>>({});
   const lastUpdateTimeRef = useRef<number>(0);
   const updateTimerRef = useRef<number | null>(null);
 
@@ -125,7 +124,7 @@ export default function ActivityBar() {
               const hasDocumentErrors = job.errors && job.errors.length > 0;
               
               return (
-                <div key={jobId} className="flex items-center gap-2 px-2 py-1 bg-base-200 rounded-full border border-base-300" title={hasDocumentErrors ? `${job.errors.length} document error(s)` : undefined}>
+                <div key={jobId} className="flex items-center gap-2 px-2 py-1 bg-base-200 rounded-full border border-base-300" title={hasDocumentErrors ? `${job.errors?.length || 0} document error(s)` : undefined}>
                   <span className="font-medium text-xs">{jobType}</span>
                   <ImSpinner2 className="w-5 h-5 animate-spin text-primary" />
                   {job.total !== undefined && (
@@ -140,7 +139,7 @@ export default function ActivityBar() {
                       ></progress>
                     </>
                   )}
-                  {hasDocumentErrors && (
+                  {hasDocumentErrors && job.errors && (
                     <span className="text-xs text-error" title={job.errors.map((e: any) => `Doc ${e.document_id}: ${e.error}`).join('\n')}>
                       {job.errors.length} error{job.errors.length !== 1 ? 's' : ''}
                     </span>

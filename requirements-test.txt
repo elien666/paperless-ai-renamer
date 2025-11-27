@@ -1,0 +1,23 @@
+# Minimal requirements for running tests
+# Heavy dependencies (chromadb, sentence-transformers) are mocked in tests
+
+# Core FastAPI dependencies
+fastapi
+uvicorn
+requests
+httpx
+
+# Configuration
+python-dotenv
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Testing framework
+pytest
+pytest-cov
+pytest-asyncio
+pytest-mock
+
+# Note: chromadb, sentence-transformers, and apscheduler are mocked in tests
+# via sys.modules mocking in tests/conftest.py, so they are not needed here
+

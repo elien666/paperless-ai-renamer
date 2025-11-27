@@ -77,13 +77,15 @@ def test_scan_endpoint_with_newer_than(app_client, mock_services, main_module):
     mock_paperless_instance.get_all_documents_filtered.return_value = []
     mock_paperless.return_value = mock_paperless_instance
     
-    response = app_client.post("/api/scan?newer_than=2024-01-01")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["newer_than"] == "2024-01-01"
-    
-    with main_module.progress_lock:
-        assert main_module.jobs[data["job_id"]]["newer_than"] == "2024-01-01"
+    # Mock the background task so it doesn't actually run
+    with patch('app.main.scheduled_search_job') as mock_job:
+        response = app_client.post("/api/scan?newer_than=2024-01-01")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["newer_than"] == "2024-01-01"
+        
+        with main_module.progress_lock:
+            assert main_module.jobs[data["job_id"]]["newer_than"] == "2024-01-01"
 
 def test_index_endpoint_creates_job(app_client, mock_services, main_module):
     """Test /api/index endpoint creates a job."""
@@ -154,9 +156,22 @@ def test_progress_endpoint_long_polling_timeout(app_client, main_module):
         main_module.jobs["test_job"] = {"status": "running", "processed": 0, "total": 10}
         # Don't create event, so it will timeout
     
-    response = app_client.get("/api/progress?job_id=test_job&wait=true&timeout=1")
-    assert response.status_code == 200
-    # Should return current state after timeout
+    # Mock asyncio.wait_for to raise TimeoutError immediately to avoid real delays in tests
+    import asyncio
+    with patch('app.main.asyncio.wait_for') as mock_wait:
+        # Make wait_for raise TimeoutError immediately to simulate timeout
+        async def mock_wait_for_side_effect(coro, timeout):
+            # Cancel the coroutine to avoid "coroutine was never awaited" warning
+            if asyncio.iscoroutine(coro):
+                coro.close()
+            # Just raise TimeoutError immediately without waiting
+            raise asyncio.TimeoutError()
+        mock_wait.side_effect = mock_wait_for_side_effect
+        
+        # Use timeout=1 (minimum valid int) but it will be mocked to return immediately
+        response = app_client.get("/api/progress?job_id=test_job&wait=true&timeout=1")
+        assert response.status_code == 200
+        # Should return current state after timeout
 
 def test_progress_endpoint_long_polling_completed_job(app_client, main_module):
     """Test /api/progress endpoint returns immediately for completed job."""
@@ -170,6 +185,10 @@ def test_progress_endpoint_long_polling_completed_job(app_client, main_module):
 
 def test_process_documents_endpoint_success(app_client, mock_services):
     """Test /api/process-documents endpoint with valid payload."""
+    # Initialize database before test - call the real function directly
+    from app.services.archive import init_database
+    init_database()
+    
     mock_paperless, mock_ai = mock_services
     mock_paperless_instance = MagicMock()
     mock_paperless_instance.get_document.return_value = {
@@ -179,15 +198,17 @@ def test_process_documents_endpoint_success(app_client, mock_services):
     }
     mock_paperless.return_value = mock_paperless_instance
     
-    response = app_client.post(
-        "/api/process-documents",
-        json={"document_ids": [1, 2, 3]}
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "processing_started"
-    assert data["document_count"] == 3
-    assert data["document_ids"] == [1, 2, 3]
+    # Mock the background task so it doesn't actually run
+    with patch('app.main.process_documents_batch') as mock_batch:
+        response = app_client.post(
+            "/api/process-documents",
+            json={"document_ids": [1, 2, 3]}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "processing_started"
+        assert data["document_count"] == 3
+        assert data["document_ids"] == [1, 2, 3]
 
 def test_process_documents_endpoint_empty_list(app_client, mock_services):
     """Test /api/process-documents endpoint with empty list."""
@@ -221,7 +242,9 @@ def test_webhook_endpoint_with_document_id(app_client, mock_services):
     }
     mock_paperless.return_value = mock_paperless_instance
     
-    with patch('app.main.archive_webhook_trigger') as mock_archive:
+    # Mock the background task so it doesn't actually run
+    with patch('app.main.archive_webhook_trigger') as mock_archive, \
+         patch('app.main.process_document_with_progress') as mock_process:
         response = app_client.post(
             "/api/webhook",
             json={"document_id": 123}
@@ -523,6 +546,10 @@ def test_scheduled_search_job_success(mock_services, main_module):
 
 def test_scheduled_search_job_error_handling(mock_services, main_module):
     """Test scheduled_search_job error handling."""
+    # Initialize database before test - call the real function directly
+    from app.services.archive import init_database
+    init_database()
+    
     mock_paperless, mock_ai = mock_services
     mock_paperless_instance = MagicMock()
     mock_paperless_instance.get_all_documents_filtered.side_effect = Exception("API Error")

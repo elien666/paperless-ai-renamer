@@ -11,6 +11,7 @@ interface ProgressContextType {
 const ProgressContext = createContext<ProgressContextType>({
   progress: {},
   loading: true,
+  subscribe: () => () => {}, // Dummy subscribe function for initial context
 });
 
 export function ProgressProvider({ children }: { children: React.ReactNode }) {
