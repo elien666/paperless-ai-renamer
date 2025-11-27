@@ -546,6 +546,10 @@ def test_scheduled_search_job_success(mock_services, main_module):
 
 def test_scheduled_search_job_error_handling(mock_services, main_module):
     """Test scheduled_search_job error handling."""
+    # Initialize database before test - call the real function directly
+    from app.services.archive import init_database
+    init_database()
+    
     mock_paperless, mock_ai = mock_services
     mock_paperless_instance = MagicMock()
     mock_paperless_instance.get_all_documents_filtered.side_effect = Exception("API Error")
