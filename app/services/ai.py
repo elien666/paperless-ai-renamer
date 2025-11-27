@@ -96,7 +96,7 @@ class AIService:
         logger.info(f"Found {len(top_outliers)} outliers out of {len(all_docs['ids'])} documents")
         return top_outliers
 
-    def generate_title(self, content: str, original_filename: str) -> str:
+    def generate_title(self, content: str, original_filename: str) -> Optional[str]:
         """Generate a new title using Ollama and RAG."""
         
         # 1. Find similar documents for few-shot learning
@@ -140,8 +140,7 @@ class AIService:
         except requests.RequestException as e:
             error_msg = f"Error calling Ollama: {e}"
             logger.error(error_msg)
-            # Raise exception with full error details so caller can capture it
-            raise Exception(error_msg) from e
+            return None
 
     def generate_title_from_image(self, image_bytes: bytes, original_title: str) -> Optional[str]:
         """Generate a title from an image using a vision model."""
@@ -181,5 +180,4 @@ class AIService:
         except requests.RequestException as e:
             error_msg = f"Error calling Ollama vision model: {e}"
             logger.error(error_msg)
-            # Raise exception with full error details so caller can capture it
-            raise Exception(error_msg) from e # Failure
+            return None
