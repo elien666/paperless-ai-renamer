@@ -1021,6 +1021,77 @@ async def delete_archive(type: str):
         logger.error(f"Error clearing error archive: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def _complete_fake_job_after_delay(job_id: str, delay_seconds: int = 10):
+    """Helper function to complete a fake job after a delay."""
+    await asyncio.sleep(delay_seconds)
+    with progress_lock:
+        if job_id in jobs and jobs[job_id].get("status") == "running":
+            jobs[job_id]["status"] = "completed"
+            jobs[job_id]["processed"] = jobs[job_id].get("total", jobs[job_id].get("processed", 0))
+            jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+            _signal_progress_update(job_id)
+            _signal_all_jobs_update()
+            logger.info(f"Fake job {job_id} completed after {delay_seconds} seconds")
+
+@api_router.post("/dev/fake-progress")
+async def create_fake_progress():
+    """
+    Development endpoint to create fake running progress jobs for screenshots.
+    This creates realistic-looking progress jobs that appear to be actively running.
+    Jobs will automatically complete after 10 seconds.
+    """
+    try:
+        # Create a fake process job
+        process_job_id = f"process-{uuid.uuid4()}"
+        with progress_lock:
+            jobs[process_job_id] = {
+                "status": "running",
+                "total": 10,
+                "processed": 5,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "document_id": 5432,
+                "document_title": "Invoice from Acme Corp - January 2024",
+                "errors": [],
+                "last_reported": time.time()
+            }
+            thread_event = ThreadEvent()
+            async_event = asyncio.Event()
+            progress_events[process_job_id] = (thread_event, async_event)
+        
+        # Create a fake index job
+        index_job_id = "index"
+        with progress_lock:
+            # Only create if index job doesn't already exist
+            if index_job_id not in jobs or jobs[index_job_id].get("status") != "running":
+                jobs[index_job_id] = {
+                    "status": "running",
+                    "total": 300,
+                    "processed": 150,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_reported": time.time()
+                }
+                thread_event = ThreadEvent()
+                async_event = asyncio.Event()
+                progress_events[index_job_id] = (thread_event, async_event)
+        
+        _signal_all_jobs_update()
+        
+        # Schedule jobs to complete after 10 seconds
+        asyncio.create_task(_complete_fake_job_after_delay(process_job_id, 10))
+        asyncio.create_task(_complete_fake_job_after_delay(index_job_id, 10))
+        
+        return {
+            "status": "success",
+            "message": "Fake progress jobs created (will complete in 10 seconds)",
+            "jobs": {
+                "process": process_job_id,
+                "index": index_job_id
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error creating fake progress: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Mount API router with /api prefix
 app.include_router(api_router, prefix="/api")
 
