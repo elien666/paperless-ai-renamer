@@ -21,6 +21,8 @@ export interface ProgressResponse {
   error?: string;
   errors?: Array<{ document_id: number; error: string }>;
   jobs?: Record<string, ProgressResponse>;
+  document_id?: number;
+  document_title?: string;
 }
 
 export interface ArchiveResponse {
