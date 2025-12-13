@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Python backend builder (for packages that need compilation)
-FROM python:3.11-slim AS python-builder
+FROM python:3.14-slim AS python-builder
 
 WORKDIR /app
 
@@ -33,7 +33,7 @@ COPY requirements-prod.txt .
 RUN pip install --no-cache-dir --user -r requirements-prod.txt
 
 # Stage 3: Final runtime image
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
