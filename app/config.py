@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     
     # Embedding model settings (Ollama model name)
     EMBEDDING_MODEL: str = "chroma/all-minilm-l6-v2-f32"
-    EMBEDDING_MAX_LENGTH: int = 1000  # Maximum characters to send to embedding model (to avoid context length errors)
-    # Note: all-MiniLM-L6-v2 has max 256 tokens (~1024 chars), so 1000 is a safe default
+    EMBEDDING_MAX_LENGTH: int = 500  # Maximum characters to send to embedding model (to avoid context length errors)
+    # Note: all-MiniLM-L6-v2 has max 256 tokens. With tokenization, ~500 chars ≈ 150-200 tokens, which is safe
     CHROMA_DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
     
     # LLM settings
