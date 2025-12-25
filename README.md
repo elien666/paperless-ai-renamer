@@ -167,6 +167,7 @@ Configure the service by editing the `environment` section in `docker-compose.ym
 | `VISION_MODEL` | `moondream` | The Ollama vision model to use for image documents |
 | `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
 | `EMBEDDING_MODEL` | `chroma/all-minilm-l6-v2-f32` | Ollama embedding model name (e.g., `chroma/all-minilm-l6-v2-f32`) |
+| `EMBEDDING_MAX_LENGTH` | `1000` | Maximum characters to send to embedding model (prevents context length errors) |
 | `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
 
 ### Example: Custom Regex for Bad Titles
@@ -517,6 +518,7 @@ For local development, you can run the frontend and backend separately for hot-r
    
    # Embedding Model (Ollama model name)
    EMBEDDING_MODEL=chroma/all-minilm-l6-v2-f32
+   EMBEDDING_MAX_LENGTH=1000
    
    # Data Path (for local dev, use relative path)
    CHROMA_DB_PATH=./data/chroma

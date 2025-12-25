@@ -17,6 +17,7 @@ services:
       - DRY_RUN=${DRY_RUN:-False}
       - LANGUAGE=${LANGUAGE:-German}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-chroma/all-minilm-l6-v2-f32}
+      - EMBEDDING_MAX_LENGTH=${EMBEDDING_MAX_LENGTH:-1000}
       - CHROMA_DB_PATH=${CHROMA_DB_PATH:-/app/data/chroma}
     volumes:
       # For local development
