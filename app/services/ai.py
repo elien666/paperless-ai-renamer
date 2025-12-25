@@ -18,11 +18,36 @@ class AIService:
         self.collection = self.chroma_client.get_or_create_collection(name="paperless_docs")
 
     def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a given text using Ollama API."""
+        """Generate embedding for a given text using Ollama API.
+        
+        Truncates text to EMBEDDING_MAX_LENGTH characters to avoid context length errors.
+        Attempts to truncate at word boundaries when possible.
+        """
+        # Truncate text if it exceeds the maximum length
+        max_length = settings.EMBEDDING_MAX_LENGTH
+        if len(text) > max_length:
+            # Try to truncate at a word boundary (space or newline)
+            truncated_text = text[:max_length]
+            # Find the last space or newline within the truncated text
+            last_space = max(
+                truncated_text.rfind(' '),
+                truncated_text.rfind('\n'),
+                truncated_text.rfind('\t')
+            )
+            # If we found a word boundary reasonably close to the limit, use it
+            # (rfind returns -1 if not found, so we check for >= 0)
+            if last_space >= 0 and last_space > max_length * 0.9:  # At least 90% of max_length
+                truncated_text = truncated_text[:last_space].strip()
+            else:
+                truncated_text = truncated_text.strip()
+            logger.warning(f"Text truncated from {len(text)} to {len(truncated_text)} characters for embedding")
+        else:
+            truncated_text = text
+        
         try:
             payload = {
                 "model": settings.EMBEDDING_MODEL,
-                "prompt": text
+                "prompt": truncated_text
             }
             response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/embeddings", json=payload)
             response.raise_for_status()

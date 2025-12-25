@@ -211,6 +211,7 @@ def test_generate_title_content_truncation(mock_settings, mock_chroma_client, mo
 def test_generate_title_template_error(mock_settings, mock_chroma_client, mock_ollama_embeddings):
     """Test title generation with invalid prompt template."""
     mock_settings.PROMPT_TEMPLATE = "Missing {missing_key}"
+    mock_settings.EMBEDDING_MAX_LENGTH = 2000  # Ensure this is set as an integer
     mock_client, mock_collection = mock_chroma_client
     
     def mock_post_side_effect(url, **kwargs):

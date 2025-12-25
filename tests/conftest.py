@@ -27,6 +27,7 @@ def mock_settings():
     settings.BAD_TITLE_REGEX = "^Scan.*"
     settings.DRY_RUN = False
     settings.EMBEDDING_MODEL = "chroma/all-minilm-l6-v2-f32"
+    settings.EMBEDDING_MAX_LENGTH = 2000
     settings.CHROMA_DB_PATH = "/tmp/test-chroma"
     settings.LLM_MODEL = "llama3"
     settings.VISION_MODEL = "moondream"
