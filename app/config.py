@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     # Embedding model settings (Ollama model name)
     EMBEDDING_MODEL: str = "chroma/all-minilm-l6-v2-f32"
+    EMBEDDING_MAX_LENGTH: int = 2000  # Maximum characters to send to embedding model (to avoid context length errors)
     CHROMA_DB_PATH: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma")
     
     # LLM settings
