@@ -64,21 +64,45 @@ class AIService:
     def add_document_to_index(self, doc_id: str, content: str, title: str):
         """Add a document to the vector index."""
         embedding = self.generate_embedding(content)
-        self.collection.upsert(
-            ids=[str(doc_id)],
-            embeddings=[embedding],
-            documents=[content],
-            metadatas=[{"title": title}]
-        )
-        logger.info(f"Indexed document {doc_id}")
+        try:
+            self.collection.upsert(
+                ids=[str(doc_id)],
+                embeddings=[embedding],
+                documents=[content],
+                metadatas=[{"title": title}]
+            )
+            logger.info(f"Indexed document {doc_id}")
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's a dimension mismatch error
+            if "dimension" in error_msg.lower() or "embedding" in error_msg.lower() and "dimension" in error_msg.lower():
+                logger.error(
+                    f"Embedding dimension mismatch! The collection was created with a different embedding model. "
+                    f"Current model '{settings.EMBEDDING_MODEL}' produces {len(embedding)}-dimensional embeddings. "
+                    f"To fix this, you need to delete the existing ChromaDB collection. "
+                    f"Delete the directory: {settings.CHROMA_DB_PATH} and restart the application."
+                )
+            raise RuntimeError(f"Failed to index document {doc_id}: {error_msg}") from e
 
     def find_similar_documents(self, content: str, n_results: int = 3) -> List[Dict[str, Any]]:
         """Find similar documents to use as context."""
         embedding = self.generate_embedding(content)
-        results = self.collection.query(
-            query_embeddings=[embedding],
-            n_results=n_results
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[embedding],
+                n_results=n_results
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's a dimension mismatch error
+            if "dimension" in error_msg.lower() or "embedding" in error_msg.lower() and "dimension" in error_msg.lower():
+                logger.error(
+                    f"Embedding dimension mismatch! The collection was created with a different embedding model. "
+                    f"Current model '{settings.EMBEDDING_MODEL}' produces {len(embedding)}-dimensional embeddings. "
+                    f"To fix this, you need to delete the existing ChromaDB collection. "
+                    f"Delete the directory: {settings.CHROMA_DB_PATH} and restart the application."
+                )
+            raise RuntimeError(f"Failed to query similar documents: {error_msg}") from e
         
         similar_docs = []
         if results['ids'] and results['metadatas']:
