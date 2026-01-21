@@ -17,49 +17,133 @@ class AIService:
         self.chroma_client = chromadb.PersistentClient(path=settings.CHROMA_DB_PATH)
         self.collection = self.chroma_client.get_or_create_collection(name="paperless_docs")
 
+    def _truncate_text(self, text: str, max_length: int) -> str:
+        """Truncate text to max_length, attempting to preserve word boundaries."""
+        if len(text) <= max_length:
+            return text
+        
+        # Try to truncate at a word boundary (space or newline)
+        truncated_text = text[:max_length]
+        # Find the last space or newline within the truncated text
+        last_space = max(
+            truncated_text.rfind(' '),
+            truncated_text.rfind('\n'),
+            truncated_text.rfind('\t')
+        )
+        # If we found a word boundary reasonably close to the limit, use it
+        # (rfind returns -1 if not found, so we check for >= 0)
+        if last_space >= 0 and last_space > max_length * 0.9:  # At least 90% of max_length
+            truncated_text = truncated_text[:last_space].strip()
+        else:
+            truncated_text = truncated_text.strip()
+        
+        return truncated_text
+
     def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a given text using Ollama API.
         
         Truncates text to EMBEDDING_MAX_LENGTH characters to avoid context length errors.
         Attempts to truncate at word boundaries when possible.
+        Implements retry logic with progressive truncation if context length errors occur.
         """
-        # Truncate text if it exceeds the maximum length
-        max_length = settings.EMBEDDING_MAX_LENGTH
-        if len(text) > max_length:
-            # Try to truncate at a word boundary (space or newline)
-            truncated_text = text[:max_length]
-            # Find the last space or newline within the truncated text
-            last_space = max(
-                truncated_text.rfind(' '),
-                truncated_text.rfind('\n'),
-                truncated_text.rfind('\t')
-            )
-            # If we found a word boundary reasonably close to the limit, use it
-            # (rfind returns -1 if not found, so we check for >= 0)
-            if last_space >= 0 and last_space > max_length * 0.9:  # At least 90% of max_length
-                truncated_text = truncated_text[:last_space].strip()
-            else:
-                truncated_text = truncated_text.strip()
-            logger.warning(f"Text truncated from {len(text)} to {len(truncated_text)} characters for embedding")
-        else:
-            truncated_text = text
+        # Apply a safety margin (80% of configured max) to account for tokenization differences
+        # Character count != token count, and some text tokenizes to more tokens per character
+        max_length = int(settings.EMBEDDING_MAX_LENGTH * 0.8)
         
-        try:
-            payload = {
-                "model": settings.EMBEDDING_MODEL,
-                "prompt": truncated_text
-            }
-            response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/embeddings", json=payload)
-            response.raise_for_status()
-            result = response.json()
-            embedding = result.get("embedding", [])
-            if not embedding:
-                raise ValueError("Empty embedding returned from Ollama")
-            return embedding
-        except requests.RequestException as e:
-            error_msg = f"Error calling Ollama for embeddings: {e}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+        # Initial truncation
+        truncated_text = self._truncate_text(text, max_length)
+        if len(text) > max_length:
+            logger.warning(f"Text truncated from {len(text)} to {len(truncated_text)} characters for embedding")
+        
+        # Retry logic with progressive truncation on context length errors
+        max_retries = 3
+        retry_count = 0
+        current_length = max_length
+        
+        while retry_count <= max_retries:
+            try:
+                payload = {
+                    "model": settings.EMBEDDING_MODEL,
+                    "prompt": truncated_text
+                }
+                response = requests.post(f"{settings.OLLAMA_BASE_URL}/api/embeddings", json=payload)
+                response.raise_for_status()
+                result = response.json()
+                embedding = result.get("embedding", [])
+                if not embedding:
+                    raise ValueError("Empty embedding returned from Ollama")
+                return embedding
+            except requests.RequestException as e:
+                # Check if this is a context length error
+                is_context_length_error = False
+                error_text = ""
+                is_500_error = False
+                
+                if hasattr(e, 'response') and e.response is not None:
+                    is_500_error = e.response.status_code == 500
+                    try:
+                        error_response = e.response.json()
+                        error_text = str(error_response).lower()
+                        # Check for common context length error indicators
+                        if any(phrase in error_text for phrase in [
+                            "context length",
+                            "exceeds the context length",
+                            "input length exceeds",
+                            "token limit",
+                            "max tokens",
+                            "llm embedding error"
+                        ]):
+                            is_context_length_error = True
+                    except:
+                        error_text = e.response.text.lower() if e.response.text else ""
+                        if any(phrase in error_text for phrase in [
+                            "context length",
+                            "exceeds the context length",
+                            "input length exceeds",
+                            "llm embedding error"
+                        ]):
+                            is_context_length_error = True
+                
+                # Also check the error message itself
+                error_msg_str = str(e).lower()
+                if any(phrase in error_msg_str for phrase in [
+                    "context length",
+                    "exceeds the context length",
+                    "input length exceeds",
+                    "llm embedding error"
+                ]):
+                    is_context_length_error = True
+                
+                # If it's a 500 error and we're using a long text, treat it as potential context length error
+                # This handles cases where Ollama logs the error but doesn't include it in the HTTP response
+                if is_500_error and not is_context_length_error and len(truncated_text) > max_length * 0.5:
+                    logger.warning(
+                        f"Received 500 error from Ollama with long text ({len(truncated_text)} chars). "
+                        f"Treating as potential context length error and retrying with shorter text."
+                    )
+                    is_context_length_error = True
+                
+                # If it's a context length error and we can retry, progressively truncate more
+                if is_context_length_error and retry_count < max_retries:
+                    retry_count += 1
+                    # Reduce length by 30% each retry
+                    current_length = int(current_length * 0.7)
+                    truncated_text = self._truncate_text(text, current_length)
+                    logger.warning(
+                        f"Context length error detected. Retrying with reduced length: "
+                        f"{len(truncated_text)} characters (attempt {retry_count}/{max_retries})"
+                    )
+                    continue
+                else:
+                    # Not a context length error, or max retries reached
+                    error_msg = f"Error calling Ollama for embeddings: {e}"
+                    if is_context_length_error:
+                        error_msg += f" (after {retry_count} retries with progressive truncation)"
+                    logger.error(error_msg)
+                    raise RuntimeError(error_msg) from e
+        
+        # Should never reach here, but just in case
+        raise RuntimeError(f"Failed to generate embedding after {max_retries} retries")
 
     def add_document_to_index(self, doc_id: str, content: str, title: str):
         """Add a document to the vector index."""
