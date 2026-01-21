@@ -167,6 +167,7 @@ Configure the service by editing the `environment` section in `docker-compose.ym
 | `VISION_MODEL` | `moondream` | The Ollama vision model to use for image documents |
 | `LANGUAGE` | `German` | Language for generated titles (e.g., `German`, `English`, `French`) |
 | `EMBEDDING_MODEL` | `chroma/all-minilm-l6-v2-f32` | Ollama embedding model name (e.g., `chroma/all-minilm-l6-v2-f32`) |
+| `EMBEDDING_MAX_LENGTH` | `500` | Maximum characters to send to embedding model (prevents context length errors) |
 | `CHROMA_DB_PATH` | `/app/data/chroma` | Path to store the vector database |
 
 ### Example: Custom Regex for Bad Titles
@@ -209,6 +210,36 @@ Ensure you've pulled the embedding model in Ollama:
 docker exec -it ollama ollama pull chroma/all-minilm-l6-v2-f32
 ```
 The embedding model is used for finding similar documents to provide context for title generation.
+
+### Embedding dimension mismatch error
+If you see an error like "Collection expecting embedding with dimension of 384, got 768", this means you've switched to a different embedding model that produces different-sized embeddings. ChromaDB collections have a fixed dimension that cannot be changed.
+
+**To fix this, you need to delete the existing ChromaDB collection:**
+
+1. **If using Docker:**
+   ```bash
+   # Stop the container
+   docker-compose stop renamer
+   
+   # Delete the ChromaDB data (adjust path if your volume is named differently)
+   docker volume rm <volume_name>_data  # or delete the chroma subdirectory
+   # Or if using bind mount:
+   rm -rf /path/to/your/data/chroma
+   
+   # Restart the container
+   docker-compose up -d renamer
+   ```
+
+2. **If running locally:**
+   ```bash
+   # Delete the ChromaDB directory
+   rm -rf ./data/chroma
+   # Or wherever your CHROMA_DB_PATH points to
+   ```
+
+3. **The collection will be automatically recreated** with the correct dimension when you restart the application.
+
+**Note:** Deleting the ChromaDB collection will remove all indexed documents. You'll need to re-index your documents using the `/api/index` endpoint after switching models.
 
 ### LLM not responding
 Ensure you've pulled all required models in Ollama:
@@ -517,6 +548,7 @@ For local development, you can run the frontend and backend separately for hot-r
    
    # Embedding Model (Ollama model name)
    EMBEDDING_MODEL=chroma/all-minilm-l6-v2-f32
+   EMBEDDING_MAX_LENGTH=500
    
    # Data Path (for local dev, use relative path)
    CHROMA_DB_PATH=./data/chroma
